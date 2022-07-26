@@ -1,19 +1,21 @@
 // Copyright (c) 2022, Mysten Labs, Inc.
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identi&fier: Apache-2.0
 
 use anyhow::anyhow;
 use clap::*;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::str::from_utf8;
 use sui_sdk::crypto::{Keystore, SuiKeystore};
 use sui_types::base_types::{decode_bytes_hex, encode_bytes_hex};
-use sui_types::crypto::KeypairTraits;
+use sui_types::crypto::{KeypairTraits, PrivateKey, ToFromBytes};
 use sui_types::sui_serde::{Base64, Encoding};
 use sui_types::{
     base_types::SuiAddress,
     crypto::{get_key_pair, EncodeDecodeBase64, KeyPair},
 };
 use tracing::info;
+use curve25519_parser::parse_openssl_25519_privkey;
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
@@ -22,6 +24,10 @@ pub enum KeyToolCommand {
     /// Generate a new keypair
     Generate,
     Show {
+        file: PathBuf,
+    },
+    /// Import armored format private key
+    Import {
         file: PathBuf,
     },
     /// Extract components
@@ -40,7 +46,7 @@ pub enum KeyToolCommand {
 }
 
 impl KeyToolCommand {
-    pub fn execute(self, keystore: SuiKeystore) -> Result<(), anyhow::Error> {
+    pub fn execute(self, mut keystore: SuiKeystore) -> Result<(), anyhow::Error> {
         match self {
             KeyToolCommand::Generate => {
                 let (_address, keypair) = get_key_pair();
@@ -55,7 +61,12 @@ impl KeyToolCommand {
                 let keypair = read_keypair_from_file(file)?;
                 println!("Public Key: {}", encode_bytes_hex(keypair.public()));
             }
-
+            KeyToolCommand::Import { file } => {
+                let keypair = import_keypair_from_file(file)?;
+                let address = keypair.public().into();
+                keystore.add_key(address, keypair.copy())?;
+                println!("Public Key: {}", encode_bytes_hex(keypair.public()));
+            }
             KeyToolCommand::Unpack { keypair } => {
                 store_and_print_keypair(keypair.public().into(), keypair)
             }
@@ -119,4 +130,33 @@ pub fn write_keypair_to_file<P: AsRef<std::path::Path>>(
 pub fn read_keypair_from_file<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result<KeyPair> {
     let contents = std::fs::read_to_string(path)?;
     KeyPair::decode_base64(contents.as_str().trim()).map_err(|e| anyhow!(e))
+}
+
+pub fn import_keypair_from_file<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result<KeyPair> {
+    // let privdata = std::fs::read(path).unwrap();    
+    // let privkey = osshkeys::KeyPair::from_keystr(from_utf8(privdata.as_slice()).unwrap(), None).unwrap();
+
+    let keyfile = std::fs::read_to_string(path).unwrap();
+    let keypair = osshkeys::KeyPair::from_keystr(&keyfile, None).unwrap();
+    osshkeys::keys::ed25519::Ed25519KeyPair::ossl_pkey;
+    let publickey = keypair.clone_public_key().unwrap();
+
+    // use pem::parse;
+    // let contents = std::fs::read_to_string(path)?;
+    // let pem = parse(contents)?;
+
+    // println!("pem: {:?}", pem.contents);
+    // println!("pem s: {:?}", pem.contents.len());
+    
+    // // Decode content according to RFC8410 ASN.1 syntax
+    // match parse_openssl_25519_privkey(&pem.contents) {
+    //     Ok(secret) => {
+    //         println!("static secret {:?}", secret.to_bytes());
+    //         match PrivateKey::from_bytes(&secret.to_bytes()) {
+    //             Ok(privkey) => Ok(KeyPair::from(privkey)),
+    //             Err(e) => Err(anyhow!(e))
+    //         }
+    //     },
+    //     Err(e) => Err(anyhow!(e))
+    // }
 }
