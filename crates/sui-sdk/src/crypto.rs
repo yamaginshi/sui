@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use sui_types::base_types::SuiAddress;
 use sui_types::crypto::{
-    get_key_pair, AccountKeyPair, EncodeDecodeBase64, KeypairTraits, Signature,
+    get_key_pair, AccountKeyPair, EncodeDecodeBase64, KeypairTraits, Signature, SuiKeyPair,
 };
 
 #[derive(Serialize, Deserialize)]

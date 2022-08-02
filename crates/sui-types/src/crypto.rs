@@ -25,7 +25,6 @@ use serde::ser::Serializer;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_with::{serde_as, Bytes};
 use sha3::Sha3_256;
-use signature::Signer;
 
 use crate::base_types::{AuthorityName, SuiAddress};
 use crate::committee::{Committee, EpochId};
@@ -43,10 +42,80 @@ pub type AuthoritySignature = Ed25519Signature;
 pub type AggregateAuthoritySignature = Ed25519AggregateSignature;
 
 // Account Objects
-pub type AccountKeyPair = Ed25519KeyPair;
-pub type AccountPublicKey = Ed25519PublicKey;
-pub type AccountPrivateKey = Ed25519PrivateKey;
-pub type AccountSignature = Ed25519Signature;
+pub type DefaultAccountKeyPair = Ed25519KeyPair;
+pub type DefaultAccountPublicKey = Ed25519PublicKey;
+pub type DefaultAccountPrivateKey = Ed25519PrivateKey;
+pub type DefaultAccountSignature = Ed25519Signature;
+
+// Enums for Signatures
+#[enum_dispatch]
+pub enum AccountKeyPair {
+    Ed25519KeyPair,
+    Secp256k1KeyPair
+}
+
+#[enum_dispatch(AccountKeyPair)]
+pub trait SuiKeyPair {
+    fn try_sign(&self, msg: &[u8]) -> Result<Signature, signature::Error>;
+}
+
+
+// pub enum PubKeyInner {
+//     Ed25519PublicKey,
+//     Secp256k1PublicKey
+// }
+
+// pub enum PrivKeyInner {
+//     Ed25519PrivateKey,
+//     Secp256k1PrivateKey
+// }
+
+// impl KeypairTraits for AccountKeyPair {
+//     type PubKey = PubKeyInner;
+
+//     type PrivKey = PrivKeyInner;
+
+//     type Sig = Signature;
+
+//     fn public(&'_ self) -> &'_ Self::PubKey {
+//         match self {
+//             AccountKeyPair::Ed25519(inner) => inner.public(),
+//             AccountKeyPair::Secp256k1(inner) => inner.public(),
+//         }
+//     }
+
+//     fn private(self) -> Self::PrivKey {
+//         match self {
+//             AccountKeyPair::Ed25519(inner) => inner.private(),
+//             AccountKeyPair::Secp256k1(inner) => inner.private(),
+//         }
+//     }
+//     fn copy(&self) -> Self {
+//         todo!()
+//     }
+
+//     fn generate<R: rand::CryptoRng + rand::RngCore>(rng: &mut R) -> Self {
+//         todo!()
+//     }
+// }
+
+impl<T: KeypairTraits> SuiKeyPair for T {
+    fn try_sign(&self,msg: &[u8]) -> Result<Signature,signature::Error> {
+        match self.try_sign(msg) {
+            Ok(sig) => Signature::from_bytes(sig.as_bytes()),
+            Err(_) => Err(signature::Error::new())
+        }
+    }
+}
+
+impl std::fmt::Debug for AccountKeyPair {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Ed25519KeyPair(arg0) => f.debug_tuple("Ed25519KeyPair").field(arg0).finish(),
+            Self::Secp256k1KeyPair(arg0) => f.debug_tuple("Secp256k1KeyPair").field(arg0).finish(),
+        }
+    }
+}
 
 //
 // Define Bytes representation of the Authority's PublicKey
@@ -242,6 +311,7 @@ where
 #[derive(Clone, JsonSchema)]
 pub enum Signature {
     Ed25519SuiSignature,
+    Secp256k1SuiSignature
 }
 
 impl Serialize for Signature {
@@ -295,6 +365,7 @@ impl AsRef<[u8]> for Signature {
     fn as_ref(&self) -> &[u8] {
         match self {
             Signature::Ed25519SuiSignature(sig) => sig.as_ref(),
+            Signature::Secp256k1SuiSignature(sig) => sig.as_ref()
         }
     }
 }
@@ -388,10 +459,6 @@ impl SuiSignatureInner for Secp256k1SuiSignature {
     const LENGTH: usize = Secp256k1PublicKey::LENGTH + Secp256k1Signature::LENGTH + 1;
 }
 
-// impl Default for Secp256k1SuiSignature {
-//     []
-// }
-
 impl SuiPublicKey for Secp256k1PublicKey {
     const FLAG: u8 = 0xed;
 }
@@ -413,13 +480,13 @@ impl signature::Signature for Secp256k1SuiSignature {
     }
 }
 
-// impl signature::Signer<Signature> for Secp256k1KeyPair {
-//     fn try_sign(&self, msg: &[u8]) -> Result<Signature, signature::Error> {
-//         Ok(Secp256k1SuiSignature::new(self, msg)
-//             .map_err(|_| signature::Error::new())?
-//             .into())
-//     }
-// }
+impl signature::Signer<Signature> for Secp256k1KeyPair {
+    fn try_sign(&self, msg: &[u8]) -> Result<Signature, signature::Error> {
+        Ok(Secp256k1SuiSignature::new(self, msg)
+            .map_err(|_| signature::Error::new())?
+            .into())
+    }
+}
 
 //
 // This struct exists due to the limitations of the `enum_dispatch` library.
@@ -456,8 +523,7 @@ pub trait SuiSignatureInner: Sized + signature::Signature {
     }
 
     fn new(kp: &Self::KeyPair, message: &[u8]) -> SuiResult<Self> {
-        let sig = kp
-            .try_sign(message)
+        let sig = signature::Signer::try_sign(kp, message)
             .map_err(|_| SuiError::InvalidSignature {
                 error: "Failed to sign valid message with keypair".to_string(),
             })?;
