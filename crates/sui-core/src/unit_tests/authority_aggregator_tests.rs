@@ -119,7 +119,7 @@ pub fn transfer_coin_transaction(
     object_ref: ObjectRef,
     gas_object_ref: ObjectRef,
 ) -> Transaction {
-    to_transaction(
+    Transaction::from_data(
         TransactionData::new_transfer(
             dest,
             object_ref,
@@ -144,7 +144,7 @@ pub fn transfer_object_move_transaction(
         CallArg::Pure(bcs::to_bytes(&AccountAddress::from(dest)).unwrap()),
     ];
 
-    to_transaction(
+    Transaction::from_data(
         TransactionData::new_move_call(
             src,
             framework_obj_ref,
@@ -173,7 +173,7 @@ pub fn crate_object_move_transaction(
         CallArg::Pure(bcs::to_bytes(&AccountAddress::from(dest)).unwrap()),
     ];
 
-    to_transaction(
+    Transaction::from_data(
         TransactionData::new_move_call(
             src,
             framework_obj_ref,
@@ -195,7 +195,7 @@ pub fn delete_object_move_transaction(
     framework_obj_ref: ObjectRef,
     gas_object_ref: ObjectRef,
 ) -> Transaction {
-    to_transaction(
+    Transaction::from_data(
         TransactionData::new_move_call(
             src,
             framework_obj_ref,
@@ -223,7 +223,7 @@ pub fn set_object_move_transaction(
         CallArg::Pure(bcs::to_bytes(&value).unwrap()),
     ];
 
-    to_transaction(
+    Transaction::from_data(
         TransactionData::new_move_call(
             src,
             framework_obj_ref,
@@ -236,11 +236,6 @@ pub fn set_object_move_transaction(
         ),
         secret,
     )
-}
-
-pub fn to_transaction(data: TransactionData, signer: &dyn Signer<Signature>) -> Transaction {
-    let signature = Signature::new(&data, signer);
-    Transaction::new(data, signature)
 }
 
 pub async fn do_transaction<A>(authority: &SafeClient<A>, transaction: &Transaction)
