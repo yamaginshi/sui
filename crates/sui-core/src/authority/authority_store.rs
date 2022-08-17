@@ -53,7 +53,7 @@ const LAST_CONSENSUS_INDEX_ADDR: u64 = 0;
 pub struct SuiDataStore<S> {
     /// A write-ahead/recovery log used to ensure we finish fully processing certs after errors or
     /// crashes.
-    pub wal: Arc<DBWriteAheadLog<CertifiedTransaction>>,
+    pub wal: Arc<DBWriteAheadLog<VerifiedCertificate>>,
 
     /// The LockService this store depends on for locking functionality
     lock_service: LockService,
@@ -106,7 +106,7 @@ impl<S: Eq + Debug + Serialize + for<'de> Deserialize<'de>> SuiDataStore<S> {
         }
     }
 
-    pub async fn acquire_tx_guard(&self, cert: &CertifiedTransaction) -> SuiResult<CertTxGuard> {
+    pub async fn acquire_tx_guard(&self, cert: &VerifiedCertificate) -> SuiResult<CertTxGuard> {
         let digest = cert.digest();
         let guard = self.wal.begin_tx(digest, cert).await?;
 
@@ -427,7 +427,7 @@ impl<S: Eq + Debug + Serialize + for<'de> Deserialize<'de>> SuiDataStore<S> {
     pub fn read_certificate(
         &self,
         digest: &TransactionDigest,
-    ) -> Result<Option<CertifiedTransaction>, SuiError> {
+    ) -> Result<Option<VerifiedCertificate>, SuiError> {
         self.perpetual_tables
             .certificates
             .get(digest)
@@ -632,7 +632,7 @@ impl<S: Eq + Debug + Serialize + for<'de> Deserialize<'de>> SuiDataStore<S> {
     pub async fn update_state(
         &self,
         inner_temporary_store: InnerTemporaryStore,
-        certificate: &CertifiedTransaction,
+        certificate: &VerifiedCertificate,
         proposed_seq: TxSequenceNumber,
         effects: &TransactionEffectsEnvelope<S>,
         effects_digest: &TransactionEffectsDigest,
@@ -689,7 +689,7 @@ impl<S: Eq + Debug + Serialize + for<'de> Deserialize<'de>> SuiDataStore<S> {
         &self,
         input_objects: InputObjects,
         mutated_objects: BTreeMap<ObjectRef, (Object, WriteKind)>,
-        certificate: CertifiedTransaction,
+        certificate: VerifiedCertificate,
         proposed_seq: TxSequenceNumber,
         effects: TransactionEffectsEnvelope<S>,
         effects_digest: &TransactionEffectsDigest,
@@ -1066,7 +1066,7 @@ impl<S: Eq + Debug + Serialize + for<'de> Deserialize<'de>> SuiDataStore<S> {
     pub fn remove_shared_objects_locks(
         &self,
         transaction_digest: &TransactionDigest,
-        transaction: &CertifiedTransaction,
+        transaction: &VerifiedCertificate,
     ) -> SuiResult {
         let mut sequenced_to_delete = Vec::new();
         let mut schedule_to_delete = Vec::new();
@@ -1091,7 +1091,7 @@ impl<S: Eq + Debug + Serialize + for<'de> Deserialize<'de>> SuiDataStore<S> {
     /// of that transaction. Used by the nodes, which don't listen to consensus.
     pub fn acquire_shared_locks_from_effects(
         &self,
-        certificate: &CertifiedTransaction,
+        certificate: &VerifiedCertificate,
         effects: &TransactionEffects,
         // Do not remove unused arg - ensures that this function is not called without holding a
         // lock.
@@ -1131,7 +1131,7 @@ impl<S: Eq + Debug + Serialize + for<'de> Deserialize<'de>> SuiDataStore<S> {
     /// Caller is responsible to call consensus_message_processed before this method
     pub async fn lock_shared_objects(
         &self,
-        certificate: CertifiedTransaction,
+        certificate: VerifiedCertificate,
         consensus_index: ExecutionIndicesWithHash,
     ) -> Result<(), SuiError> {
         // Make an iterator to save the certificate.
@@ -1352,7 +1352,7 @@ impl<S: Eq + Debug + Serialize + for<'de> Deserialize<'de>> SuiDataStore<S> {
     pub fn get_certified_transaction(
         &self,
         transaction_digest: &TransactionDigest,
-    ) -> SuiResult<Option<CertifiedTransaction>> {
+    ) -> SuiResult<Option<VerifiedCertificate>> {
         let transaction = self.perpetual_tables.certificates.get(transaction_digest)?;
         Ok(transaction)
     }
@@ -1360,7 +1360,7 @@ impl<S: Eq + Debug + Serialize + for<'de> Deserialize<'de>> SuiDataStore<S> {
     pub fn multi_get_certified_transaction(
         &self,
         transaction_digests: &[TransactionDigest],
-    ) -> SuiResult<Vec<Option<CertifiedTransaction>>> {
+    ) -> SuiResult<Vec<Option<VerifiedCertificate>>> {
         Ok(self
             .perpetual_tables
             .certificates
@@ -1402,8 +1402,8 @@ impl SuiDataStore<AuthoritySignInfo> {
     pub fn get_signed_transaction_info(
         &self,
         transaction_digest: &TransactionDigest,
-    ) -> Result<TransactionInfoResponse, SuiError> {
-        Ok(TransactionInfoResponse {
+    ) -> Result<VerifiedTransactionInfoResponse, SuiError> {
+        Ok(VerifiedTransactionInfoResponse {
             signed_transaction: self.epoch_tables.transactions.get(transaction_digest)?,
             certified_transaction: self.perpetual_tables.certificates.get(transaction_digest)?,
             signed_effects: self.perpetual_tables.effects.get(transaction_digest)?,

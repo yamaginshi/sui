@@ -102,7 +102,7 @@ pub struct AuthorityPerpetualTables<S> {
     /// along with the genesis allows the reconstruction of all other state, and a full sync to this
     /// authority.
     #[default_options_override_fn = "certificates_table_default_config"]
-    pub(crate) certificates: DBMap<TransactionDigest, CertifiedTransaction>,
+    pub(crate) certificates: DBMap<TransactionDigest, VerifiedCertificate>,
 
     /// The map between the object ref of objects processed at all versions and the transaction
     /// digest of the certificate that lead to the creation of this version of the object.

@@ -614,7 +614,7 @@ where
         &self,
         input_objects: InputObjects,
         transaction: Transaction,
-    ) -> Result<(CertifiedTransaction, CertifiedTransactionEffects), anyhow::Error> {
+    ) -> Result<(VerifiedCertificate, CertifiedTransactionEffects), anyhow::Error> {
         // If execute_transaction ever fails due to panic, we should fix the panic and make sure it doesn't.
         // If execute_transaction fails, we should retry the same transaction, and it will
         // properly unlock the objects used in this transaction. In the short term, we will ask the wallet to retry failed transactions.
@@ -744,7 +744,7 @@ where
         &self,
         transaction: Transaction,
         is_last_retry: bool,
-    ) -> Result<(CertifiedTransaction, CertifiedTransactionEffects), anyhow::Error> {
+    ) -> Result<(VerifiedCertificate, CertifiedTransactionEffects), anyhow::Error> {
         let (input_objects, owned_objects) =
             self.prepare_transaction(&transaction)
                 .await

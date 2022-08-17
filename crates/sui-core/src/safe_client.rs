@@ -224,10 +224,17 @@ impl<C> SafeClient<C> {
         &self,
         digest: &TransactionDigest,
         effects_digest: Option<&TransactionEffectsDigest>,
-        response: &TransactionInfoResponse,
-    ) -> SuiResult {
+        response: TransactionInfoResponse,
+    ) -> SuiResult<VerifiedTransactionInfoResponse> {
         let mut committee = None;
-        if let Some(signed_transaction) = &response.signed_transaction {
+
+        let TransactionInfoResponse {
+            signed_transaction,
+            certified_transaction,
+            signed_effects,
+        } = response;
+
+        if let Some(signed_transaction) = &signed_transaction {
             committee = Some(self.get_committee(&signed_transaction.auth_sign_info.epoch)?);
             // Check the transaction signature
             signed_transaction.verify(committee.as_ref().unwrap())?;
@@ -249,23 +256,27 @@ impl<C> SafeClient<C> {
             );
         }
 
-        if let Some(certificate) = &response.certified_transaction {
-            if committee.is_none() {
-                committee = Some(self.get_committee(&certificate.auth_sign_info.epoch)?);
-            }
-            // Check signatures and quorum
-            certificate.verify(committee.as_ref().unwrap())?;
-            // Check it's the right transaction
-            fp_ensure!(
-                certificate.digest() == digest,
-                SuiError::ByzantineAuthoritySuspicion {
-                    authority: self.address,
-                    reason: "Unexpected digest in the certified tx".to_string()
+        let certified_transaction = match &certified_transaction {
+            Some(certificate) => {
+                if committee.is_none() {
+                    committee = Some(self.get_committee(&certificate.auth_sign_info.epoch)?);
                 }
-            );
-        }
+                // Check signatures and quorum
+                let certificate = certificate.verify(committee.as_ref().unwrap())?;
+                // Check it's the right transaction
+                fp_ensure!(
+                    certificate.digest() == digest,
+                    SuiError::ByzantineAuthoritySuspicion {
+                        authority: self.address,
+                        reason: "Unexpected digest in the certified tx".to_string()
+                    }
+                );
+                Some(certificate)
+            }
+            None => None,
+        };
 
-        if let Some(signed_effects) = &response.signed_effects {
+        if let Some(signed_effects) = &signed_effects {
             if committee.is_none() {
                 committee = Some(self.get_committee(&signed_effects.auth_signature.epoch)?);
             }
@@ -300,7 +311,11 @@ impl<C> SafeClient<C> {
             }
         }
 
-        Ok(())
+        Ok(VerifiedTransactionInfoResponse {
+            signed_transaction,
+            certified_transaction,
+            signed_effects,
+        })
     }
 
     fn check_object_response(
@@ -319,7 +334,7 @@ impl<C> SafeClient<C> {
         }
 
         // Check the right object ID and version is returned
-        if let Some((object_id, version, _)) = &response.requested_object_reference {
+        if let Some((object_id, version, _)) = &requested_object_reference {
             fp_ensure!(
                 object_id == &request.object_id,
                 SuiError::ByzantineAuthoritySuspicion {
@@ -339,7 +354,7 @@ impl<C> SafeClient<C> {
             }
         }
 
-        if let Some(object_and_lock) = &response.object_and_lock {
+        if let Some(object_and_lock) = &object_and_lock {
             // We should only be returning the object and lock data if requesting the latest object info.
             fp_ensure!(
                 matches!(
@@ -396,7 +411,11 @@ impl<C> SafeClient<C> {
             }
         }
 
-        Ok(())
+        Ok(VerifiedObjectInfoResponse {
+            parent_certificate,
+            requested_object_reference,
+            object_and_lock,
+        })
     }
 
     fn check_update_item_batch_response(
@@ -464,14 +483,14 @@ where
     pub async fn handle_transaction(
         &self,
         transaction: Transaction,
-    ) -> Result<TransactionInfoResponse, SuiError> {
+    ) -> Result<VerifiedTransactionInfoResponse, SuiError> {
         let digest = *transaction.digest();
         let _timer = self.metrics_handle_transaction_latency.start_timer();
         let transaction_info = self
             .authority_client
             .handle_transaction(transaction)
             .await?;
-        check_error!(
+        let transaction_info = check_error!(
             self.address,
             self.check_transaction_response(&digest, None, &transaction_info),
             "Client error in handle_transaction"
@@ -483,7 +502,7 @@ where
         &self,
         digest: &TransactionDigest,
         response: &TransactionInfoResponse,
-    ) -> SuiResult {
+    ) -> SuiResult<VerifiedTransactionInfoResponse> {
         fp_ensure!(
             response.signed_effects.is_some(),
             SuiError::ByzantineAuthoritySuspicion {
@@ -499,7 +518,7 @@ where
     pub async fn handle_certificate(
         &self,
         certificate: CertifiedTransaction,
-    ) -> Result<TransactionInfoResponse, SuiError> {
+    ) -> Result<VerifiedTransactionInfoResponse, SuiError> {
         let digest = *certificate.digest();
         let _timer = self.metrics_handle_certificate_latency.start_timer();
         let transaction_info = self
@@ -507,7 +526,7 @@ where
             .handle_certificate(certificate)
             .await?;
 
-        check_error!(
+        let transaction_info = check_error!(
             self.address,
             self.verify_certificate_response(&digest, &transaction_info),
             "Client error in handle_certificate"
@@ -530,7 +549,7 @@ where
         &self,
         request: ObjectInfoRequest,
         skip_committee_check_during_reconfig: bool,
-    ) -> Result<ObjectInfoResponse, SuiError> {
+    ) -> Result<VerifiedObjectInfoResponse, SuiError> {
         self.metrics_total_requests_handle_object_info_request.inc();
 
         let _timer = self.metrics_handle_obj_info_latency.start_timer();
@@ -538,12 +557,14 @@ where
             .authority_client
             .handle_object_info_request(request.clone())
             .await?;
-        if let Err(err) =
-            self.check_object_response(&request, &response, skip_committee_check_during_reconfig)
-        {
-            error!(?err, authority=?self.address, "Client error in handle_object_info_request");
-            return Err(err);
-        }
+        let response = self
+            .check_object_response(&request, response)
+            .tap_err(|err|
+                error!(?err, authority=?self.address, "Client error in handle_object_info_request")
+
+
+                )?;
+
         self.metrics_total_ok_responses_handle_object_info_request
             .inc();
         Ok(response)
@@ -553,7 +574,7 @@ where
     pub async fn handle_transaction_info_request(
         &self,
         request: TransactionInfoRequest,
-    ) -> Result<TransactionInfoResponse, SuiError> {
+    ) -> Result<VerifiedTransactionInfoResponse, SuiError> {
         self.metrics_total_requests_handle_transaction_info_request
             .inc();
         let digest = request.transaction_digest;
@@ -565,10 +586,17 @@ where
             .handle_transaction_info_request(request)
             .await?;
 
-        if let Err(err) = self.check_transaction_response(&digest, None, &transaction_info) {
-            error!(?err, authority=?self.address, "Client error in handle_transaction_info_request");
-            return Err(err);
-        }
+        let transaction_info = match self.check_transaction_response(
+            &digest,
+            None,
+            transaction_info,
+        ) {
+            Err(err) => {
+                error!(?err, authority=?self.address, "Client error in handle_transaction_info_request");
+                return Err(err);
+            }
+            Ok(i) => i,
+        };
         self.metrics_total_ok_responses_handle_transaction_info_request
             .inc();
         Ok(transaction_info)
@@ -578,7 +606,7 @@ where
     pub async fn handle_transaction_and_effects_info_request(
         &self,
         digests: &ExecutionDigests,
-    ) -> Result<TransactionInfoResponse, SuiError> {
+    ) -> Result<VerifiedTransactionInfoResponse, SuiError> {
         self.metrics_total_requests_handle_transaction_and_effects_info_request
             .inc();
         let transaction_info = self
@@ -586,14 +614,17 @@ where
             .handle_transaction_info_request(digests.transaction.into())
             .await?;
 
-        if let Err(err) = self.check_transaction_response(
+        let transaction_info = match self.check_transaction_response(
             &digests.transaction,
             Some(&digests.effects),
-            &transaction_info,
+            transaction_info,
         ) {
-            error!(?err, authority=?self.address, "Client error in handle_transaction_and_effects_info_request");
-            return Err(err);
-        }
+            Err(err) => {
+                error!(?err, authority=?self.address, "Client error in handle_transaction_and_effects_info_request");
+                return Err(err);
+            }
+            Ok(info) => info,
+        };
         self.metrics_total_ok_responses_handle_transaction_and_effects_info_request
             .inc();
         Ok(transaction_info)

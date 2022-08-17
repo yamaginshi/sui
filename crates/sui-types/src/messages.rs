@@ -40,6 +40,7 @@ use std::fmt::{Display, Formatter};
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     hash::{Hash, Hasher},
+    ops::Deref,
 };
 use tracing::debug;
 
@@ -911,6 +912,33 @@ impl PartialEq for SignedTransaction {
 pub type CertifiedTransaction = TransactionEnvelope<AuthorityStrongQuorumSignInfo>;
 pub type TxCertAndSignedEffects = (CertifiedTransaction, SignedTransactionEffects);
 
+// We do allow serialization/deserialization of this type so that we can write verified data to the
+// db and not re-verify it after loading it. However, be careful not to deserialize this type from
+// an untrusted source such as the network!
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerifiedTransactionEnvelope<T>(TransactionEnvelope<T>);
+
+impl<T> VerifiedTransactionEnvelope<T> {
+    pub fn into_inner(self) -> TransactionEnvelope<T> {
+        self.0
+    }
+}
+
+impl<T> Deref for VerifiedTransactionEnvelope<T> {
+    type Target = TransactionEnvelope<T>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> From<VerifiedTransactionEnvelope<T>> for TransactionEnvelope<T> {
+    fn from(v: VerifiedTransactionEnvelope<T>) -> Self {
+        v.0
+    }
+}
+
+pub type VerifiedCertificate = VerifiedTransactionEnvelope<AuthorityStrongQuorumSignInfo>;
+
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub struct AccountInfoRequest {
     pub account: SuiAddress,
@@ -1030,12 +1058,12 @@ pub struct ObjectResponse {
 /// This message provides information about the latest object and its lock
 /// as well as the parent certificate of the object at a specific version.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ObjectInfoResponse {
+pub struct ObjectInfoResponse<T = CertifiedTransaction> {
     /// The certificate that created or mutated the object at a given version.
     /// If no parent certificate was requested the latest certificate concerning
     /// this object is sent. If the parent was requested and not found a error
     /// (ParentNotfound or CertificateNotfound) will be returned.
-    pub parent_certificate: Option<CertifiedTransaction>,
+    pub parent_certificate: Option<T>,
     /// The full reference created by the above certificate
     pub requested_object_reference: Option<ObjectRef>,
 
@@ -1044,6 +1072,8 @@ pub struct ObjectInfoResponse {
     /// If the object does not exist this is also None.
     pub object_and_lock: Option<ObjectResponse>,
 }
+
+pub type VerifiedObjectInfoResponse = ObjectInfoResponse<VerifiedCertificate>;
 
 impl ObjectInfoResponse {
     pub fn object(&self) -> Option<&Object> {
@@ -1066,14 +1096,33 @@ impl From<TransactionDigest> for TransactionInfoRequest {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct TransactionInfoResponse {
+pub struct TransactionInfoResponse<T = CertifiedTransaction> {
     // The signed transaction response to handle_transaction
     pub signed_transaction: Option<SignedTransaction>,
     // The certificate in case one is available
-    pub certified_transaction: Option<CertifiedTransaction>,
+    pub certified_transaction: Option<T>,
     // The effects resulting from a successful execution should
     // contain ObjectRef created, mutated, deleted and events.
     pub signed_effects: Option<SignedTransactionEffects>,
+}
+
+pub type VerifiedTransactionInfoResponse = TransactionInfoResponse<VerifiedCertificate>;
+
+impl From<VerifiedTransactionInfoResponse> for TransactionInfoResponse {
+    fn from(v: VerifiedTransactionInfoResponse) -> Self {
+        let VerifiedTransactionInfoResponse {
+            signed_transaction,
+            certified_transaction,
+            signed_effects,
+        } = v;
+
+        let certified_transaction = certified_transaction.map(|c| c.into_inner());
+        TransactionInfoResponse {
+            signed_transaction,
+            certified_transaction,
+            signed_effects,
+        }
+    }
 }
 
 #[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
@@ -1945,7 +1994,7 @@ impl CertifiedTransaction {
     }
 
     /// Verify the certificate.
-    pub fn verify(&self, committee: &Committee) -> Result<(), SuiError> {
+    pub fn verify_signatures(&self, committee: &Committee) -> SuiResult {
         // We use this flag to see if someone has checked this before
         // and therefore we can skip the check. Note that the flag has
         // to be set to true manually, and is not set by calling this
@@ -1964,6 +2013,11 @@ impl CertifiedTransaction {
             .add_to_verification_obligation(committee, &mut obligation, idx)?;
 
         obligation.verify_all().map(|_| ())
+    }
+
+    pub fn verify(self, committee: &Committee) -> SuiResult<VerifiedCertificate> {
+        self.verify_signatures(committee)?;
+        Ok(VerifiedTransactionEnvelope::<AuthorityStrongQuorumSignInfo>(self))
     }
 
     pub fn epoch(&self) -> EpochId {
@@ -2050,7 +2104,9 @@ impl ConsensusTransaction {
 
     pub fn verify(&self, committee: &Committee) -> SuiResult<()> {
         match &self.kind {
-            ConsensusTransactionKind::UserTransaction(certificate) => certificate.verify(committee),
+            ConsensusTransactionKind::UserTransaction(certificate) => {
+                certificate.verify_signatures(committee)
+            }
             ConsensusTransactionKind::Checkpoint(fragment) => fragment.verify(committee),
         }
     }
