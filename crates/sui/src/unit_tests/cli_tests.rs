@@ -1,6 +1,7 @@
 // Copyright (c) 2022, Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::path::Path;
 use std::{fmt::Write, fs::read_dir, path::PathBuf, str, time::Duration};
 
 use anyhow::anyhow;
@@ -21,7 +22,7 @@ use sui_config::{
 };
 use sui_json::SuiJsonValue;
 use sui_json_rpc_types::{GetObjectDataResponse, SuiData, SuiParsedObject, SuiTransactionEffects};
-use sui_sdk::crypto::KeystoreType;
+use sui_sdk::crypto::{KeystoreType, FileBasedKeystore, SuiKeystore};
 use sui_sdk::ClientType;
 use sui_types::crypto::{
     AccountKeyPair, AuthorityKeyPair, Ed25519SuiSignature, KeypairTraits, Secp256k1SuiSignature,
@@ -1140,5 +1141,13 @@ async fn test_split_coin() -> Result<(), anyhow::Error> {
     assert_eq!(get_gas_value(&g.updated_coin) + 1000 + 10, orig_value);
     assert!((get_gas_value(&g.new_coins[0]) == 1000) || (get_gas_value(&g.new_coins[0]) == 10));
     assert!((get_gas_value(&g.new_coins[1]) == 1000) || (get_gas_value(&g.new_coins[1]) == 10));
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_file_load() -> Result<(), anyhow::Error> {
+    let keystore_path = PathBuf::from(Path::new("/Users/joy/mysten/sui/crates/sui/src/unit_tests/test.keystore"));
+    let keystore = FileBasedKeystore::load_or_create(&keystore_path).unwrap();
+    println!("c={:?}", keystore.key_pairs());
     Ok(())
 }
