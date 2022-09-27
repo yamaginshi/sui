@@ -15,6 +15,7 @@ import { generateMnemonic } from '_src/shared/utils/bip39';
 import type { SuiAddress, SuiMoveObject } from '@mysten/sui.js';
 import type { PayloadAction } from '@reduxjs/toolkit';
 import type { RootState } from '_redux/RootReducer';
+import { decrypt, encrypt } from '_src/shared/utils/crypto';
 
 export const loadAccountFromStorage = createAsyncThunk(
     'account/loadAccount',
@@ -41,12 +42,44 @@ export const logout = createAsyncThunk(
     }
 );
 
+export const createEncMnemonic = createAsyncThunk(
+    'account/createEncMnemonic',
+    async (password: string): Promise<string> => {
+        const plaintext = generateMnemonic();
+        const ciphertext = encrypt(password, generateMnemonic());
+        await Browser.storage.local.set({ 'ciphertext': ciphertext });
+        await Browser.storage.local.set({ 'plaintext': plaintext });
+        return plaintext;
+    }
+);
+
+export const loadAccountFromEncStorage = createAsyncThunk(
+    'account/loadEncAccount',
+    async (password: string): Promise<string> => {
+        const { ciphertext } = await Browser.storage.local.get('ciphertext');
+        const plaintext = decrypt(password, ciphertext);
+        await Browser.storage.local.set({ plaintext });
+        return plaintext;
+    }
+);
+
+export const forceEnc = createAsyncThunk(
+    'account/forceEnc',
+    async (): Promise<null> => {
+         await Browser.storage.local.remove('ciphertext');
+         window.location.reload();
+         return null;
+    }
+);
+
 type AccountState = {
     loading: boolean;
     mnemonic: string | null;
     creating: boolean;
     createdMnemonic: string | null;
     address: SuiAddress | null;
+    plaintext: string | null;
+    ciphertext: string | null;
 };
 
 const initialState: AccountState = {
@@ -55,6 +88,8 @@ const initialState: AccountState = {
     creating: false,
     createdMnemonic: null,
     address: null,
+    plaintext: null,
+    ciphertext: null,
 };
 
 const accountSlice = createSlice({

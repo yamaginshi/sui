@@ -132,6 +132,7 @@ importers:
 
   apps/wallet:
     specifiers:
+      '@metamask/browser-passworder': ^3.0.0
       '@mysten/sui.js': workspace:*
       '@popperjs/core': ^2.11.6
       '@reduxjs/toolkit': ^1.8.3
@@ -196,6 +197,7 @@ importers:
       webpack-merge: ^5.8.0
       yup: ^0.32.11
     dependencies:
+      '@metamask/browser-passworder': 3.0.0
       '@mysten/sui.js': link:../../sdk/typescript
       '@popperjs/core': 2.11.6
       '@reduxjs/toolkit': 1.8.5_kkwg4cbsojnjnupd3btipussee
@@ -3897,6 +3899,11 @@ packages:
   /@mdx-js/util/1.6.22:
     resolution: {integrity: sha512-H1rQc1ZOHANWBvPcW+JpGwr+juXSxM8Q8YCkm3GhZd8REu1fHR3z99CErO1p9pkcfcxZnMdIZdIsXkOHY0NilA==}
     dev: true
+
+  /@metamask/browser-passworder/3.0.0:
+    resolution: {integrity: sha512-hD10mgvhcDkZX8wnauw8udp1K2MzcbZfrN7Yon9sQ+OqVK9kiQ4VhZAyZNZTy9KJLtfoVD9Y2F6L4gEese7hDA==}
+    engines: {node: '>=12.0.0'}
+    dev: false
 
   /@mrmlnc/readdir-enhanced/2.2.1:
     resolution: {integrity: sha512-bPHp6Ji8b41szTOcaP63VlnbbO5Ny6dwAATtY6JTjh5N2OLrb5Qk/Th5cRkRQhkWCt+EJsYrNB0MiL+Gpn6e3g==}
