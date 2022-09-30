@@ -163,6 +163,7 @@ pub fn make_transactions_with_pre_genesis_objects(
         addresses_two_by_two.push(address);
         addresses_two_by_two.push(address);
     }
+    let copied = addresses_two_by_two.clone();
     let gas_objects = test_gas_objects_with_owners(addresses_two_by_two);
 
     // Make one transaction for every two gas objects.

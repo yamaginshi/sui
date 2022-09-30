@@ -3,9 +3,10 @@
 use std::str::FromStr;
 
 use sha3::{Digest, Sha3_256};
+use sui_types::intent::ChainId;
 use tempfile::TempDir;
 
-use sui_sdk::crypto::KeystoreType;
+use sui_sdk::crypto::SuiKeyStore;
 use sui_types::crypto::{SignatureScheme, SuiSignatureInner};
 use sui_types::{
     base_types::{SuiAddress, SUI_ADDRESS_LENGTH},
@@ -15,13 +16,17 @@ use sui_types::{
 fn mnemonic_test() {
     let temp_dir = TempDir::new().unwrap();
     let keystore_path = temp_dir.path().join("sui.keystore");
-    let mut keystore = KeystoreType::File(keystore_path).init().unwrap();
+    let mut keystore = SuiKeyStore::File((keystore_path, ChainId::Testing))
+        .init()
+        .unwrap();
     let (address, phrase, scheme) = keystore
         .generate_new_key(SignatureScheme::ED25519, None)
         .unwrap();
 
     let keystore_path_2 = temp_dir.path().join("sui2.keystore");
-    let mut keystore2 = KeystoreType::File(keystore_path_2).init().unwrap();
+    let mut keystore2 = SuiKeyStore::File((keystore_path_2, ChainId::Testing))
+        .init()
+        .unwrap();
     let imported_address = keystore2
         .import_from_mnemonic(&phrase, SignatureScheme::ED25519, None)
         .unwrap();
@@ -37,7 +42,9 @@ fn sui_wallet_address_mnemonic_test() -> Result<(), anyhow::Error> {
 
     let temp_dir = TempDir::new().unwrap();
     let keystore_path = temp_dir.path().join("sui.keystore");
-    let mut keystore = KeystoreType::File(keystore_path).init().unwrap();
+    let mut keystore = SuiKeyStore::File((keystore_path, ChainId::Testing))
+        .init()
+        .unwrap();
 
     keystore
         .import_from_mnemonic(phrase, SignatureScheme::ED25519, None)

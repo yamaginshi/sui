@@ -9,7 +9,7 @@ use sui::config::SuiClientConfig;
 use sui_config::genesis_config::GenesisConfig;
 use sui_config::Config;
 use sui_config::SUI_KEYSTORE_FILENAME;
-use sui_sdk::crypto::KeystoreType;
+use sui_sdk::crypto::SuiKeyStore;
 use sui_sdk::ClientType;
 use sui_swarm::memory::Node;
 use sui_swarm::memory::Swarm;
@@ -17,6 +17,7 @@ use sui_types::base_types::SuiAddress;
 use sui_types::crypto::KeypairTraits;
 use sui_types::crypto::SuiKeyPair;
 use sui_types::crypto::{get_key_pair, AccountKeyPair};
+use sui_types::intent::ChainId;
 use test_utils::network::{start_rpc_test_network_with_fullnode, TestNetwork};
 use tracing::info;
 
@@ -285,7 +286,7 @@ pub async fn new_wallet_context_from_cluster(
     let rpc_url = cluster.rpc_url();
     info!("Use gateway: {}", &rpc_url);
     let keystore_path = temp_dir.path().join(SUI_KEYSTORE_FILENAME);
-    let keystore = KeystoreType::File(keystore_path);
+    let keystore = SuiKeyStore::File(keystore_path);
     let address: SuiAddress = key_pair.public().into();
     keystore
         .init()
@@ -296,6 +297,7 @@ pub async fn new_wallet_context_from_cluster(
         keystore,
         client_type: ClientType::RPC(rpc_url.into(), None),
         active_address: Some(address),
+        chain_id: ChainId::Testing,
     }
     .persisted(&wallet_config_path)
     .save()

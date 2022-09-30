@@ -621,6 +621,7 @@ pub struct TransactionEnvelope<S> {
 
     /// authority signature information, if available, is signed by an authority, applied on `tx_signature` || `data`.
     pub auth_sign_info: S,
+
     // Note: If any new field is added here, make sure the Hash and PartialEq
     // implementation are adjusted to include that new field (unless the new field
     // does not participate in the hash and comparison).

@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use std::fmt::{Display, Formatter, Write};
-use sui_sdk::crypto::KeystoreType;
+use sui_sdk::crypto::SuiKeyStore;
 use sui_types::base_types::*;
 
 pub use sui_config::Config;
@@ -17,7 +17,7 @@ use sui_sdk::ClientType;
 #[serde_as]
 #[derive(Serialize, Deserialize)]
 pub struct SuiClientConfig {
-    pub keystore: KeystoreType,
+    pub keystore: SuiKeyStore,
     pub client_type: ClientType,
     pub active_address: Option<SuiAddress>,
 }

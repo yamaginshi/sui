@@ -21,12 +21,14 @@ use sui_json_rpc::gateway_api::{
 };
 
 use sui_json_rpc::{JsonRpcServerBuilder, ServerHandle};
-use sui_sdk::crypto::KeystoreType;
+use sui_sdk::crypto::SuiKeyStore;
 use sui_sdk::{ClientType, SuiClient};
 use sui_swarm::memory::{Swarm, SwarmBuilder};
 use sui_types::base_types::SuiAddress;
 use sui_types::crypto::KeypairTraits;
 use sui_types::crypto::SuiKeyPair::Ed25519SuiKeyPair;
+use sui_types::intent::ChainId;
+
 const NUM_VALIDAOTR: usize = 4;
 
 pub async fn start_test_network(
@@ -41,6 +43,9 @@ pub async fn start_test_network_with_fullnodes(
     fullnode_port: Option<u16>,
     websocket_port: Option<u16>,
 ) -> Result<Swarm, anyhow::Error> {
+    let chain_id: ChainId = genesis_config
+        .as_ref()
+        .map_or_else(|| ChainId::Testing, |config| config.chain_id);
     let mut builder: SwarmBuilder = Swarm::builder()
         .committee_size(NonZeroUsize::new(NUM_VALIDAOTR).unwrap())
         .with_fullnode_count(fullnode_count);
@@ -68,7 +73,7 @@ pub async fn start_test_network_with_fullnodes(
     let gateway_path = dir.join(SUI_GATEWAY_CONFIG);
 
     swarm.config().save(&network_path)?;
-    let mut keystore = KeystoreType::File(keystore_path.clone()).init()?;
+    let mut keystore = SuiKeyStore::File(keystore_path.clone()).init(&chain_id)?;
     for key in &swarm.config().account_keys {
         keystore.add_key(Ed25519SuiKeyPair(key.copy()))?;
     }
@@ -85,13 +90,14 @@ pub async fn start_test_network_with_fullnodes(
 
     // Create wallet config with stated authorities port
     SuiClientConfig {
-        keystore: KeystoreType::File(keystore_path),
+        keystore: SuiKeyStore::File(keystore_path),
         client_type: ClientType::Embedded(GatewayConfig {
             db_folder_path,
             validator_set: validators,
             ..Default::default()
         }),
         active_address,
+        chain_id,
     }
     .save(&wallet_path)?;
 
@@ -162,7 +168,7 @@ pub async fn start_rpc_test_network_with_fullnode(
     let mut wallet_conf: SuiClientConfig =
         PersistedConfig::read(&working_dir.join(SUI_CLIENT_CONFIG))?;
     let rpc_url = format!("http://{}", rpc_server_handle.local_addr());
-    let accounts = wallet_conf.keystore.init()?.addresses();
+    let accounts = wallet_conf.keystore.init(&ChainId::Testing)?.addresses();
     wallet_conf.client_type = ClientType::RPC(rpc_url.clone(), None);
     wallet_conf
         .persisted(&working_dir.join(SUI_CLIENT_CONFIG))

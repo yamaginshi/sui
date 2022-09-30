@@ -1046,3 +1046,27 @@ async fn test_get_objects_read() -> Result<(), anyhow::Error> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_keystore_signs_with_intent() -> Result<(), anyhow::Error> {
+    let keystore = SuiKeyStore::InMem(2).init().unwrap();
+    let my_address = keystore.addresses()[0];
+    let recipient = keystore.addresses()[1];
+
+    let sui = SuiClient::new_rpc_client("https://gateway.devnet.sui.io:443", None).await?;
+    let gas_object = Object::with_owner_for_testing(my_address);
+
+    let transfer_tx = sui
+        .transaction_builder()
+        .transfer_sui(my_address, gas_object.id(), 1000, recipient, Some(1))
+        .await?;
+
+    let sig = keystore.sign(keystore.addresses().get(0).unwrap(), &transfer_tx.to_bytes())?;
+
+    let transaction_response = sui
+        .quorum_driver()
+        .execute_transaction(Transaction::new(transfer_tx, sig))
+        .await?;
+    println!("Transaction response: {:?}", transaction_response);
+    Ok(())
+}

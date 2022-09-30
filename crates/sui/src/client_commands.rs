@@ -27,7 +27,7 @@ use sui_json_rpc_types::{
     SuiTransactionResponse,
 };
 use sui_json_rpc_types::{SuiCertifiedTransaction, SuiExecutionStatus, SuiTransactionEffects};
-use sui_sdk::crypto::SuiKeystore;
+use sui_sdk::crypto::SuiKeyStore;
 use sui_sdk::{ClientType, SuiClient};
 use sui_types::crypto::SignatureScheme;
 use sui_types::sui_serde::{Base64, Encoding};
@@ -301,6 +301,26 @@ pub enum SuiClientCommands {
         /// Gas budget for this transfer
         #[clap(long)]
         gas_budget: Option<u64>,
+    },
+
+    /// SerializeTransfer
+    #[clap(name = "serialize-transfer")]
+    SerializeTransfer {
+        /// Recipient address
+        #[clap(long)]
+        to: SuiAddress,
+
+        /// Sui coin object to transfer, ID in 20 bytes Hex string. This is also the gas object.
+        #[clap(long)]
+        sui_coin_object_id: ObjectID,
+
+        /// Gas budget for this transfer
+        #[clap(long)]
+        gas_budget: u64,
+
+        /// The amount to transfer, if not specified, the entire coin object will be transferred.
+        #[clap(long)]
+        amount: Option<u64>,
     },
 }
 
@@ -609,6 +629,20 @@ impl SuiClientCommands {
                 let object_read = context.client.read_api().get_parsed_object(nft_id).await?;
                 SuiClientCommandResult::CreateExampleNFT(object_read)
             }
+            SuiClientCommands::SerializeTransfer {
+                to,
+                sui_coin_object_id: object_id,
+                gas_budget,
+                amount,
+            } => {
+                let from = context.get_object_owner(&object_id).await?;
+                let data = context
+                    .client
+                    .transaction_builder()
+                    .transfer_sui(from, object_id, gas_budget, to, amount)
+                    .await?;
+                SuiClientCommandResult::SerializeTransfer(Base64::encode(data.to_bytes()))
+            }
         });
         ret
     }
@@ -639,7 +673,7 @@ impl SuiClientCommands {
 
 pub struct WalletContext {
     pub config: PersistedConfig<SuiClientConfig>,
-    pub keystore: SuiKeystore,
+    pub keystore: SuiKeyStore,
     pub client: SuiClient,
 }
 
@@ -911,6 +945,9 @@ impl Display for SuiClientCommandResult {
                 writeln!(writer, "{}\n", "Successfully created an ExampleNFT:".bold())?;
                 writeln!(writer, "{}", object)?;
             }
+            SuiClientCommandResult::SerializeTransfer(encoded_data) => {
+                writeln!(writer, "{}", encoded_data)?;
+            }
         }
         write!(f, "{}", writer.trim_end_matches('\n'))
     }
@@ -1038,6 +1075,7 @@ pub enum SuiClientCommandResult {
     Switch(SwitchResponse),
     ActiveAddress(Option<SuiAddress>),
     CreateExampleNFT(GetObjectDataResponse),
+    SerializeTransfer(String),
 }
 
 #[derive(Serialize, Clone, Debug)]

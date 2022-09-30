@@ -14,7 +14,7 @@ use clap::Subcommand;
 use serde::Deserialize;
 
 use sui_sdk::{
-    crypto::{KeystoreType, SuiKeystore},
+    crypto::{SuiKeyStore, SuiKeystore},
     json::SuiJsonValue,
     rpc_types::SuiData,
     types::{
@@ -24,12 +24,13 @@ use sui_sdk::{
     },
     SuiClient,
 };
+use sui_types::intent::ChainId;
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     let opts: TicTacToeOpts = TicTacToeOpts::parse();
     let keystore_path = opts.keystore_path.unwrap_or_else(default_keystore_path);
-    let keystore = KeystoreType::File(keystore_path).init()?;
+    let keystore = SuiKeyStore::File((keystore_path, opts.chain_id)).init()?;
 
     let game = TicTacToe {
         game_package_id: opts.game_package_id,
@@ -272,6 +273,8 @@ struct TicTacToeOpts {
     keystore_path: Option<PathBuf>,
     #[clap(long, default_value = "https://gateway.devnet.sui.io:443")]
     rpc_server_url: String,
+    #[clap(long, default_value = "0")]
+    chain_id: ChainId,
     #[clap(subcommand)]
     subcommand: TicTacToeCommand,
 }

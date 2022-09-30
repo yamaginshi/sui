@@ -8,7 +8,7 @@ use super::write_keypair_to_file;
 use super::KeyToolCommand;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
-use sui_sdk::crypto::KeystoreType;
+use sui_sdk::crypto::SuiKeyStore;
 use sui_types::base_types::SuiAddress;
 use sui_types::crypto::get_key_pair;
 use sui_types::crypto::get_key_pair_from_rng;
@@ -25,7 +25,7 @@ use tempfile::TempDir;
 #[test]
 fn test_addresses_command() -> Result<(), anyhow::Error> {
     // Add 3 Ed25519 KeyPairs as default
-    let mut keystore = KeystoreType::InMem(3).init().unwrap();
+    let mut keystore = SuiKeyStore::InMem(3).init().unwrap();
 
     // Add another 3 Secp256k1 KeyPairs
     for _ in 0..3 {
@@ -39,7 +39,7 @@ fn test_addresses_command() -> Result<(), anyhow::Error> {
 
 #[test]
 fn test_flag_in_signature_and_keypair() -> Result<(), anyhow::Error> {
-    let mut keystore = KeystoreType::InMem(0).init().unwrap();
+    let mut keystore = SuiKeyStore::InMem(0).init().unwrap();
 
     keystore.add_key(SuiKeyPair::Secp256k1SuiKeyPair(get_key_pair().1))?;
     keystore.add_key(SuiKeyPair::Ed25519SuiKeyPair(get_key_pair().1))?;
@@ -135,13 +135,15 @@ fn test_load_keystore_err() {
     assert!(res.is_ok());
 
     // cannot load keypair due to missing flag
-    assert!(KeystoreType::File(path2).init().is_err());
+    assert!(SuiKeyStore::File((path2, ChainId::Testing))
+        .init()
+        .is_err());
 }
 
 #[test]
 fn test_mnemonics_ed25519() -> Result<(), anyhow::Error> {
     // Test case matches with /sui/wallet/src/shared/cryptography/mnemonics.test.ts
-    let mut keystore = KeystoreType::InMem(0).init().unwrap();
+    let mut keystore = SuiKeyStore::InMem(0).init().unwrap();
     let phrase = "result crisp session latin must fruit genuine question prevent start coconut brave speak student dismiss";
     KeyToolCommand::Import {
         mnemonic_phrase: phrase.to_string(),
@@ -167,7 +169,7 @@ fn test_mnemonics_ed25519() -> Result<(), anyhow::Error> {
 #[test]
 fn test_mnemonics_secp256k1() -> Result<(), anyhow::Error> {
     // Test case generated from https://microbitcoinorg.github.io/mnemonic/ with path m/54'/784'/0'/0/0
-    let mut keystore = KeystoreType::InMem(0).init().unwrap();
+    let mut keystore = SuiKeyStore::InMem(0).init().unwrap();
     let phrase = "result crisp session latin must fruit genuine question prevent start coconut brave speak student dismiss";
     KeyToolCommand::Import {
         mnemonic_phrase: phrase.to_string(),
@@ -192,7 +194,7 @@ fn test_mnemonics_secp256k1() -> Result<(), anyhow::Error> {
 
 #[test]
 fn test_invalid_derivation_path() -> Result<(), anyhow::Error> {
-    let mut keystore = KeystoreType::InMem(0).init().unwrap();
+    let mut keystore = SuiKeyStore::InMem(0).init().unwrap();
     let phrase = "result crisp session latin must fruit genuine question prevent start coconut brave speak student dismiss";
 
     assert!(KeyToolCommand::Import {
@@ -240,7 +242,7 @@ fn test_invalid_derivation_path() -> Result<(), anyhow::Error> {
 
 #[test]
 fn test_valid_derivation_path() -> Result<(), anyhow::Error> {
-    let mut keystore = KeystoreType::InMem(0).init().unwrap();
+    let mut keystore = SuiKeyStore::InMem(0).init().unwrap();
     let phrase = "result crisp session latin must fruit genuine question prevent start coconut brave speak student dismiss";
 
     assert!(KeyToolCommand::Import {

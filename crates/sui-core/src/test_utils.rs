@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
-
+use sui_sdk::crypto::SuiKeyStore;
 use crate::{
     authority::AuthorityState,
     authority_aggregator::{AuthAggMetrics, AuthorityAggregator},
@@ -127,7 +127,7 @@ pub async fn wait_for_all_txes(wait_digests: Vec<TransactionDigest>, state: Arc<
 // Creates a fake sender-signed transaction for testing. This transaction will
 // not actually work.
 pub fn create_fake_transaction() -> Transaction {
-    let (sender, sender_key): (_, AccountKeyPair) = get_key_pair();
+    let keystore = SuiKeyStore::InMem(InMemKeystore::new(1));
     let recipient = dbg_addr(2);
     let object_id = ObjectID::random();
     let object = Object::immutable_with_id_for_testing(object_id);
@@ -138,6 +138,7 @@ pub fn create_fake_transaction() -> Transaction {
         object.compute_object_reference(),
         10000,
     );
-    let signature = Signature::new(&data, &sender_key);
+    let signature = keystore.sign(&data).unwrap();
+    // let signature = Signature::new(&data, &sender_key);
     Transaction::new(data, signature)
 }
