@@ -312,11 +312,6 @@ impl Worker {
             &channel_metrics.tx_quorum_waiter,
             &channel_metrics.tx_quorum_waiter_total,
         );
-        let (tx_client_processor, rx_client_processor) = channel_with_total(
-            CHANNEL_CAPACITY,
-            &channel_metrics.tx_client_processor,
-            &channel_metrics.tx_client_processor_total,
-        );
 
         // We first receive clients' transactions from the network.
         let address = self
@@ -338,6 +333,7 @@ impl Worker {
         // (in a reliable manner) the batches to all other workers that share the same `id` as us. Finally, it
         // gathers the 'cancel handlers' of the messages and send them to the `QuorumWaiter`.
         let batch_maker_handle = BatchMaker::spawn(
+            self.id,
             (*(*(*self.committee).load()).clone()).clone(),
             self.parameters.batch_size,
             self.parameters.max_batch_delay,
@@ -345,6 +341,8 @@ impl Worker {
             /* rx_transaction */ rx_batch_maker,
             /* tx_message */ tx_quorum_waiter,
             node_metrics,
+            self.store.clone(),
+            tx_primary,
         );
 
         // The `QuorumWaiter` waits for 2f authorities to acknowledge reception of the batch. It then forwards
@@ -356,19 +354,7 @@ impl Worker {
             self.worker_cache.clone(),
             tx_reconfigure.subscribe(),
             /* rx_message */ rx_quorum_waiter,
-            /* tx_batch */ tx_client_processor,
             P2pNetwork::new(network),
-        );
-
-        // The `Processor` hashes and stores the batch. It then forwards the batch's digest to the `PrimaryConnector`
-        // that will send it to our primary machine.
-        let processor_handle = Processor::spawn(
-            self.id,
-            self.store.clone(),
-            tx_reconfigure.subscribe(),
-            /* rx_batch */ rx_client_processor,
-            /* tx_digest */ tx_primary,
-            /* own_batch */ true,
         );
 
         info!(
@@ -379,7 +365,6 @@ impl Worker {
         vec![
             batch_maker_handle,
             quorum_waiter_handle,
-            processor_handle,
             tx_receiver_handle,
         ]
     }

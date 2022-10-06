@@ -44,6 +44,8 @@ impl Processor {
 
                         // Store the batch.
                         store.write(digest, batch).await;
+                        // Wait until the batch was written
+                        let _ = store.notify_read(digest).await;
 
                         // Deliver the batch's digest.
                         let message = match own_digest {
