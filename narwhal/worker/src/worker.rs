@@ -6,7 +6,6 @@ use crate::{
     handlers::{PrimaryReceiverHandler, WorkerReceiverHandler},
     metrics::WorkerChannelMetrics,
     primary_connector::PrimaryConnector,
-    processor::Processor,
     quorum_waiter::QuorumWaiter,
     synchronizer::Synchronizer,
 };
@@ -100,11 +99,6 @@ impl Worker {
         let (tx_reconfigure, rx_reconfigure) =
             watch::channel(ReconfigureNotification::NewEpoch(initial_committee));
 
-        let (tx_worker_processor, rx_worker_processor) = channel_with_total(
-            CHANNEL_CAPACITY,
-            &channel_metrics.tx_worker_processor,
-            &channel_metrics.tx_worker_processor_total,
-        );
         let (tx_synchronizer, rx_synchronizer) = channel_with_total(
             CHANNEL_CAPACITY,
             &channel_metrics.tx_synchronizer,
@@ -112,7 +106,8 @@ impl Worker {
         );
 
         let worker_service = WorkerToWorkerServer::new(WorkerReceiverHandler {
-            tx_processor: tx_worker_processor.clone(),
+            id: worker.id,
+            tx_digest: tx_primary.clone(),
             store: worker.store.clone(),
         });
         let primary_service = PrimaryToWorkerServer::new(PrimaryReceiverHandler {
@@ -124,7 +119,6 @@ impl Worker {
             request_batches_retry_nodes: worker.parameters.sync_retry_nodes,
             tx_synchronizer,
             tx_primary: tx_primary.clone(),
-            tx_batch_processor: tx_worker_processor,
         });
 
         // Receive incoming messages from other workers.
@@ -242,11 +236,6 @@ impl Worker {
             endpoint_metrics,
             network.clone(),
         );
-        let worker_flow_handles = worker.handle_workers_messages(
-            &tx_reconfigure,
-            tx_primary.clone(),
-            rx_worker_processor,
-        );
         let primary_flow_handles =
             worker.handle_primary_messages(rx_synchronizer, tx_reconfigure, tx_primary, network);
 
@@ -265,7 +254,6 @@ impl Worker {
         let mut handles = vec![primary_connector_handle, connection_monitor_handle];
         handles.extend(primary_flow_handles);
         handles.extend(client_flow_handles);
-        handles.extend(worker_flow_handles);
         handles
     }
 
@@ -362,32 +350,7 @@ impl Worker {
             self.id, address
         );
 
-        vec![
-            batch_maker_handle,
-            quorum_waiter_handle,
-            tx_receiver_handle,
-        ]
-    }
-
-    /// Spawn all tasks responsible to handle messages from other workers.
-    fn handle_workers_messages(
-        &self,
-        tx_reconfigure: &watch::Sender<ReconfigureNotification>,
-        tx_primary: Sender<WorkerPrimaryMessage>,
-        rx_worker_processor: Receiver<Batch>,
-    ) -> Vec<JoinHandle<()>> {
-        // This `Processor` hashes and stores the batches we receive from the other workers. It then forwards the
-        // batch's digest to the `PrimaryConnector` that will send it to our primary.
-        let processor_handle = Processor::spawn(
-            self.id,
-            self.store.clone(),
-            tx_reconfigure.subscribe(),
-            /* rx_batch */ rx_worker_processor,
-            /* tx_digest */ tx_primary,
-            /* own_batch */ false,
-        );
-
-        vec![processor_handle]
+        vec![batch_maker_handle, quorum_waiter_handle, tx_receiver_handle]
     }
 }
 

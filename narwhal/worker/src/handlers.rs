@@ -28,7 +28,8 @@ pub mod handlers_tests;
 /// Defines how the network receiver handles incoming workers messages.
 #[derive(Clone)]
 pub struct WorkerReceiverHandler {
-    pub tx_processor: Sender<Batch>,
+    pub id: WorkerId,
+    pub tx_digest: Sender<WorkerPrimaryMessage>,
     pub store: Store<BatchDigest, Batch>,
 }
 
@@ -40,11 +41,19 @@ impl WorkerToWorker for WorkerReceiverHandler {
     ) -> Result<anemo::Response<()>, anemo::rpc::Status> {
         let message = request.into_body();
         match message {
-            WorkerMessage::Batch(batch) => self
-                .tx_processor
-                .send(batch)
-                .await
-                .map_err(|_| DagError::ShuttingDown),
+            WorkerMessage::Batch(batch) => {
+                // Store the batch.
+                let digest = batch.digest();
+                self.store.write(digest, batch).await;
+                // Wait until the batch was written
+                let _ = self.store.notify_read(digest).await;
+
+                let primary_message = WorkerPrimaryMessage::OthersBatch(digest, self.id);
+                self.tx_digest
+                    .send(primary_message)
+                    .await
+                    .map_err(|_| DagError::ShuttingDown)
+            }
         }
         .map(|_| anemo::Response::new(()))
         .map_err(|e| anemo::rpc::Status::internal(e.to_string()))
@@ -85,8 +94,22 @@ pub struct PrimaryReceiverHandler {
     pub tx_synchronizer: Sender<PrimaryWorkerMessage>,
     // Output channel to send messages to primary.
     pub tx_primary: Sender<WorkerPrimaryMessage>,
-    // Output channel to process received batches.
-    pub tx_batch_processor: Sender<Batch>,
+}
+
+impl PrimaryReceiverHandler {
+    async fn process_new_batch(&self, batch: Batch) {
+        // Now save it to disk
+        let digest = batch.digest();
+        self.store.write(digest, batch).await;
+        // Wait until the batch was written
+        let _ = self.store.notify_read(digest).await;
+
+        // Finally send to primary
+        let message = WorkerPrimaryMessage::OthersBatch(digest, self.id);
+        if self.tx_primary.send(message).await.is_err() {
+            tracing::debug!("{}", DagError::ShuttingDown);
+        };
+    }
 }
 
 #[async_trait]
@@ -192,10 +215,7 @@ impl PrimaryToWorker for PrimaryReceiverHandler {
                         if missing.remove(digest) {
                             // Only send batch to processor if we haven't received it already
                             // from another source.
-                            if self.tx_batch_processor.send(batch).await.is_err() {
-                                // Assume error sending to processor means we're shutting down.
-                                return Err(anemo::rpc::Status::internal("shutting down"));
-                            }
+                            self.process_new_batch(batch).await;
                         }
                     }
                 }
@@ -250,10 +270,7 @@ impl PrimaryToWorker for PrimaryReceiverHandler {
                         if missing.remove(digest) {
                             // Only send batch to processor if we haven't received it already
                             // from another source.
-                            if self.tx_batch_processor.send(batch).await.is_err() {
-                                // Assume error sending to processor means we're shutting down.
-                                return Err(anemo::rpc::Status::internal("shutting down"));
-                            }
+                            self.process_new_batch(batch).await;
                         }
                     }
                 }

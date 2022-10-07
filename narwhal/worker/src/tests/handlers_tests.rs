@@ -1,4 +1,4 @@
-// Copyright (c) 2021, Facebook, Inc. and its affiliates
+// Copyright (c) 2021, Facebook, Inc. and its affiliates_batch_processor
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 use super::*;
@@ -11,8 +11,7 @@ async fn synchronize() {
     telemetry_subscribers::init_for_testing();
 
     let (tx_synchronizer, _rx_synchronizer) = test_utils::test_channel!(1);
-    let (tx_primary, _rx_primary) = test_utils::test_channel!(1);
-    let (tx_batch_processor, mut rx_batch_processor) = test_utils::test_channel!(1);
+    let (tx_primary, mut rx_primary) = test_utils::test_channel!(1);
 
     let fixture = CommitteeFixture::builder().randomize_ports(true).build();
     let worker_cache = fixture.shared_worker_cache();
@@ -31,7 +30,6 @@ async fn synchronize() {
         request_batches_retry_nodes: 3, // Not used in this test.
         tx_synchronizer,
         tx_primary,
-        tx_batch_processor,
     };
 
     // Set up mock behavior for child RequestBatches RPC.
@@ -90,8 +88,8 @@ async fn synchronize() {
         .insert(send_network.downgrade())
         .is_none());
     handler.synchronize(request).await.unwrap();
-    let recv_batch = rx_batch_processor.recv().await.unwrap();
-    assert_eq!(recv_batch, batch);
+    let recv_batch = rx_primary.recv().await.unwrap();
+    assert!(matches!(recv_batch, WorkerPrimaryMessage::OthersBatch(..)));
 }
 
 #[tokio::test]
@@ -100,7 +98,6 @@ async fn synchronize_when_batch_exists() {
 
     let (tx_synchronizer, _rx_synchronizer) = test_utils::test_channel!(1);
     let (tx_primary, mut rx_primary) = test_utils::test_channel!(1);
-    let (tx_batch_processor, _rx_batch_processor) = test_utils::test_channel!(1);
 
     let fixture = CommitteeFixture::builder().randomize_ports(true).build();
     let worker_cache = fixture.shared_worker_cache();
@@ -119,7 +116,6 @@ async fn synchronize_when_batch_exists() {
         request_batches_retry_nodes: 3, // Not used in this test.
         tx_synchronizer,
         tx_primary,
-        tx_batch_processor,
     };
 
     // Store the batch.
@@ -161,7 +157,6 @@ async fn delete_batches() {
 
     let (tx_synchronizer, _rx_synchronizer) = test_utils::test_channel!(1);
     let (tx_primary, _rx_primary) = test_utils::test_channel!(1);
-    let (tx_batch_processor, _rx_batch_processor) = test_utils::test_channel!(1);
 
     let fixture = CommitteeFixture::builder().randomize_ports(true).build();
     let worker_cache = fixture.shared_worker_cache();
@@ -184,7 +179,6 @@ async fn delete_batches() {
         request_batches_retry_nodes: 3, // Not used in this test.
         tx_synchronizer,
         tx_primary,
-        tx_batch_processor,
     };
     let message = WorkerDeleteBatchesMessage {
         digests: vec![digest],
