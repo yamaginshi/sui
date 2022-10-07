@@ -15,7 +15,7 @@ use tap::TapFallible;
 use tokio::time::{self};
 use tracing::{debug, error, info, trace};
 use types::{
-    error::DagError, metered_channel::Sender, Batch, BatchDigest, PrimaryToWorker,
+    error::DagError, metered_channel::Sender, Batch, BatchDigest, PrimaryResponse, PrimaryToWorker,
     PrimaryWorkerMessage, RequestBatchRequest, RequestBatchResponse, WorkerBatchRequest,
     WorkerBatchResponse, WorkerDeleteBatchesMessage, WorkerMessage, WorkerPrimaryMessage,
     WorkerSynchronizeMessage, WorkerToWorker, WorkerToWorkerClient,
@@ -29,7 +29,7 @@ pub mod handlers_tests;
 #[derive(Clone)]
 pub struct WorkerReceiverHandler {
     pub id: WorkerId,
-    pub tx_digest: Sender<WorkerPrimaryMessage>,
+    pub tx_digest: Sender<(WorkerPrimaryMessage, PrimaryResponse)>,
     pub store: Store<BatchDigest, Batch>,
 }
 
@@ -50,7 +50,7 @@ impl WorkerToWorker for WorkerReceiverHandler {
 
                 let primary_message = WorkerPrimaryMessage::OthersBatch(digest, self.id);
                 self.tx_digest
-                    .send(primary_message)
+                    .send((primary_message, None))
                     .await
                     .map_err(|_| DagError::ShuttingDown)
             }
@@ -93,7 +93,7 @@ pub struct PrimaryReceiverHandler {
     pub request_batches_retry_nodes: usize,
     pub tx_synchronizer: Sender<PrimaryWorkerMessage>,
     // Output channel to send messages to primary.
-    pub tx_primary: Sender<WorkerPrimaryMessage>,
+    pub tx_primary: Sender<(WorkerPrimaryMessage, PrimaryResponse)>,
 }
 
 impl PrimaryReceiverHandler {
@@ -106,7 +106,7 @@ impl PrimaryReceiverHandler {
 
         // Finally send to primary
         let message = WorkerPrimaryMessage::OthersBatch(digest, self.id);
-        if self.tx_primary.send(message).await.is_err() {
+        if self.tx_primary.send((message, None)).await.is_err() {
             tracing::debug!("{}", DagError::ShuttingDown);
         };
     }
@@ -162,7 +162,7 @@ impl PrimaryToWorker for PrimaryReceiverHandler {
         // worker and message has been missed by primary).
         for digest in available {
             let message = WorkerPrimaryMessage::OthersBatch(digest, self.id);
-            let _ = self.tx_primary.send(message).await.tap_err(|err| {
+            let _ = self.tx_primary.send((message, None)).await.tap_err(|err| {
                 debug!("{err:?} {}", DagError::ShuttingDown);
             });
         }

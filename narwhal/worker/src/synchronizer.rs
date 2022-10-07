@@ -13,7 +13,8 @@ use tokio::{sync::watch, task::JoinHandle};
 use tracing::warn;
 use types::{
     metered_channel::{Receiver, Sender},
-    Batch, BatchDigest, ReconfigureNotification, WorkerPrimaryError, WorkerPrimaryMessage,
+    Batch, BatchDigest, PrimaryResponse, ReconfigureNotification, WorkerPrimaryError,
+    WorkerPrimaryMessage,
 };
 
 #[cfg(test)]
@@ -35,7 +36,7 @@ pub struct Synchronizer {
     /// Send reconfiguration update to other tasks.
     tx_reconfigure: watch::Sender<ReconfigureNotification>,
     /// Output channel to send out the batch requests.
-    tx_primary: Sender<WorkerPrimaryMessage>,
+    tx_primary: Sender<(WorkerPrimaryMessage, PrimaryResponse)>,
 }
 
 impl Synchronizer {
@@ -46,7 +47,7 @@ impl Synchronizer {
         store: Store<BatchDigest, Batch>,
         rx_message: Receiver<PrimaryWorkerMessage>,
         tx_reconfigure: watch::Sender<ReconfigureNotification>,
-        tx_primary: Sender<WorkerPrimaryMessage>,
+        tx_primary: Sender<(WorkerPrimaryMessage, PrimaryResponse)>,
         network: P2pNetwork,
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
@@ -149,7 +150,7 @@ impl Synchronizer {
         };
 
         self.tx_primary
-            .send(message)
+            .send((message, None))
             .await
             .expect("Failed to send message to primary channel");
     }

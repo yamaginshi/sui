@@ -6,7 +6,9 @@ use crypto::NetworkPublicKey;
 use futures::{stream::FuturesUnordered, StreamExt};
 use network::{P2pNetwork, ReliableNetwork};
 use tokio::{sync::watch, task::JoinHandle};
-use types::{metered_channel::Receiver, ReconfigureNotification, WorkerPrimaryMessage};
+use types::{
+    metered_channel::Receiver, PrimaryResponse, ReconfigureNotification, WorkerPrimaryMessage,
+};
 
 /// The maximum number of digests kept in memory waiting to be sent to the primary.
 pub const MAX_PENDING_DIGESTS: usize = 10_000;
@@ -18,7 +20,7 @@ pub struct PrimaryConnector {
     /// Receive reconfiguration updates.
     rx_reconfigure: watch::Receiver<ReconfigureNotification>,
     /// Input channel to receive the messages to send to the primary.
-    rx_digest: Receiver<WorkerPrimaryMessage>,
+    rx_digest: Receiver<(WorkerPrimaryMessage, PrimaryResponse)>,
     /// A network sender to send the batches' digests to the primary.
     primary_client: P2pNetwork,
 }
@@ -28,7 +30,7 @@ impl PrimaryConnector {
     pub fn spawn(
         primary_name: NetworkPublicKey,
         rx_reconfigure: watch::Receiver<ReconfigureNotification>,
-        rx_digest: Receiver<WorkerPrimaryMessage>,
+        rx_digest: Receiver<(WorkerPrimaryMessage, PrimaryResponse)>,
         primary_client: P2pNetwork,
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
@@ -48,14 +50,20 @@ impl PrimaryConnector {
         loop {
             tokio::select! {
                 // Send the digest through the network.
-                Some(digest) = self.rx_digest.recv() => {
+                Some((digest, _response)) = self.rx_digest.recv() => {
                     if futures.len() >= MAX_PENDING_DIGESTS {
                         tracing::warn!("Primary unreachable: dropping {digest:?}");
                         continue;
                     }
 
                     let handle = self.primary_client.send(self.primary_name.to_owned(), &digest).await;
-                    futures.push(handle);
+                    futures.push(async move {
+                        if handle.await.is_ok(){
+                            if let Some(response_channel) = _response {
+                                let _ = response_channel.send(());
+                            }
+                        };
+                    });
                 },
 
                 // Trigger reconfigure.

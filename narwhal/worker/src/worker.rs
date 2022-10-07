@@ -28,8 +28,9 @@ use tracing::info;
 use types::{
     error::DagError,
     metered_channel::{channel_with_total, Receiver, Sender},
-    Batch, BatchDigest, Empty, PrimaryToWorkerServer, ReconfigureNotification, Transaction,
-    TransactionProto, Transactions, TransactionsServer, WorkerPrimaryMessage, WorkerToWorkerServer,
+    Batch, BatchDigest, Empty, PrimaryResponse, PrimaryToWorkerServer, ReconfigureNotification,
+    Transaction, TransactionProto, Transactions, TransactionsServer, TxResponse,
+    WorkerPrimaryMessage, WorkerToWorkerServer,
 };
 
 #[cfg(test)]
@@ -262,7 +263,7 @@ impl Worker {
         &self,
         rx_synchronizer: Receiver<PrimaryWorkerMessage>,
         tx_reconfigure: watch::Sender<ReconfigureNotification>,
-        tx_primary: Sender<WorkerPrimaryMessage>,
+        tx_primary: Sender<(WorkerPrimaryMessage, PrimaryResponse)>,
         network: anemo::Network,
     ) -> Vec<JoinHandle<()>> {
         // The `Synchronizer` is responsible to keep the worker in sync with the others. It handles the commands
@@ -284,7 +285,7 @@ impl Worker {
     fn handle_clients_transactions(
         &self,
         tx_reconfigure: &watch::Sender<ReconfigureNotification>,
-        tx_primary: Sender<WorkerPrimaryMessage>,
+        tx_primary: Sender<(WorkerPrimaryMessage, PrimaryResponse)>,
         node_metrics: Arc<WorkerMetrics>,
         channel_metrics: Arc<WorkerChannelMetrics>,
         endpoint_metrics: WorkerEndpointMetrics,
@@ -357,7 +358,7 @@ impl Worker {
 /// Defines how the network receiver handles incoming transactions.
 #[derive(Clone)]
 struct TxReceiverHandler {
-    tx_batch_maker: Sender<(Transaction, crate::batch_maker::TxResponse)>,
+    tx_batch_maker: Sender<(Transaction, TxResponse)>,
 }
 
 impl TxReceiverHandler {

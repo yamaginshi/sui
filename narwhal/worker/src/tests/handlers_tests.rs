@@ -89,7 +89,10 @@ async fn synchronize() {
         .is_none());
     handler.synchronize(request).await.unwrap();
     let recv_batch = rx_primary.recv().await.unwrap();
-    assert!(matches!(recv_batch, WorkerPrimaryMessage::OthersBatch(..)));
+    assert!(matches!(
+        recv_batch,
+        (WorkerPrimaryMessage::OthersBatch(..), None)
+    ));
 }
 
 #[tokio::test]
@@ -132,7 +135,7 @@ async fn synchronize_when_batch_exists() {
         target,
     };
     let responder_handle = tokio::spawn(async move {
-        if let WorkerPrimaryMessage::OthersBatch(recv_digest, recv_id) =
+        if let (WorkerPrimaryMessage::OthersBatch(recv_digest, recv_id), _) =
             rx_primary.recv().await.unwrap()
         {
             assert_eq!(recv_digest, batch_id);

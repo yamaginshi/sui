@@ -54,7 +54,7 @@ async fn test_successful_request_batch() {
     // THEN we should receive batch the batch
     if let Ok(Some(message)) = timeout(Duration::from_secs(5), rx_primary.recv()).await {
         match message {
-            WorkerPrimaryMessage::RequestedBatch(digest, batch) => {
+            (WorkerPrimaryMessage::RequestedBatch(digest, batch), None) => {
                 assert_eq!(batch, expected_batch);
                 assert_eq!(digest, expected_digest)
             }
@@ -109,7 +109,7 @@ async fn test_request_batch_not_found() {
     // THEN we should receive batch the batch
     if let Ok(Some(message)) = timeout(Duration::from_secs(5), rx_primary.recv()).await {
         match message {
-            WorkerPrimaryMessage::Error(error) => {
+            (WorkerPrimaryMessage::Error(error), None) => {
                 assert_eq!(
                     error,
                     WorkerPrimaryError::RequestedBatchNotFound(expected_batch_id)
