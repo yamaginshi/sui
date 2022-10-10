@@ -4,13 +4,10 @@ use blake2::digest::Update;
 use config::{Committee, SharedWorkerCache};
 use crypto::PublicKey;
 use fastcrypto::{Digest, Hash};
-use std::{
-    collections::BTreeMap,
-    fmt::{Debug, Display, Formatter},
-};
+use std::fmt::{Debug, Display, Formatter};
 use thiserror::Error;
 use tracing::{error, warn};
-use types::{Certificate, CertificateDigest, Round};
+use types::{Certificate, CertificateDigest};
 
 // RequestID helps us identify an incoming request and
 // all the consequent network requests associated with it.
@@ -141,15 +138,7 @@ impl CertificatesResponse {
 }
 
 #[derive(Debug, Clone)]
-pub struct CertificateDigestsResponse {
-    // Certificate digests, grouped by round numbers.
-    pub certificate_ids: BTreeMap<Round, Vec<CertificateDigest>>,
-    pub from: PublicKey,
-}
-
-#[derive(Debug, Clone)]
 pub enum AvailabilityResponse {
-    CertificateDigest(CertificateDigestsResponse),
     Certificate(CertificatesResponse),
     Payload(PayloadAvailabilityResponse),
 }

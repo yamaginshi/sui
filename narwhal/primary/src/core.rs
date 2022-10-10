@@ -59,7 +59,7 @@ pub struct Core {
     /// Receives loopback headers from the `HeaderWaiter`.
     rx_header_waiter: Receiver<Header>,
     /// Receives loopback certificates from the `CertificateWaiter`.
-    rx_certificate_waiter: Receiver<Certificate>,
+    rx_certificates_loopback: Receiver<Certificate>,
     /// Receives our newly created headers from the `Proposer`.
     rx_proposer: Receiver<Header>,
     /// Output all certificates to the consensus layer.
@@ -108,7 +108,7 @@ impl Core {
         rx_committee: watch::Receiver<ReconfigureNotification>,
         rx_primaries: Receiver<PrimaryMessage>,
         rx_header_waiter: Receiver<Header>,
-        rx_certificate_waiter: Receiver<Certificate>,
+        rx_certificates_loopback: Receiver<Certificate>,
         rx_proposer: Receiver<Header>,
         tx_consensus: Sender<Certificate>,
         tx_proposer: Sender<(Vec<Certificate>, Round, Epoch)>,
@@ -129,7 +129,7 @@ impl Core {
                 rx_reconfigure: rx_committee,
                 rx_primaries,
                 rx_header_waiter,
-                rx_certificate_waiter,
+                rx_certificates_loopback,
                 rx_proposer,
                 tx_consensus,
                 tx_proposer,
@@ -205,6 +205,13 @@ impl Core {
     #[async_recursion]
     #[instrument(level = "debug", skip_all, fields(header_digest = ?header.digest()))]
     async fn process_header(&mut self, header: &Header) -> DagResult<()> {
+        self.process_header_internal(header, /* signed */ false)
+            .await
+    }
+
+    #[async_recursion]
+    #[instrument(level = "debug", skip_all, fields(header_digest = ?header.digest()))]
+    async fn process_header_internal(&mut self, header: &Header, signed: bool) -> DagResult<()> {
         debug!("Processing {:?} round:{:?}", header, header.round);
         let header_source = if self.name.eq(&header.author) {
             "own"
@@ -229,15 +236,11 @@ impl Core {
                 .inc();
         }
 
-        // If the following condition is valid, it means we already garbage collected the parents. There is thus
-        // no points in trying to synchronize them or vote for the header. We just need to gather the payload.
-        if self.gc_round >= header.round {
+        // If the header has been signed, there is no point in trying to vote.
+        // Also any missing parent will be fetched by certificate waiter.
+        if signed {
             if self.synchronizer.missing_payload(header).await? {
-                self.metrics
-                    .headers_suspended
-                    .with_label_values(&[&header.epoch.to_string(), "missing_payload"])
-                    .inc();
-                debug!("Downloading the payload of {header}");
+                debug!("Downloading the certificate payload of {header}");
             }
             return Ok(());
         }
@@ -422,6 +425,11 @@ impl Core {
     #[async_recursion]
     #[instrument(level = "debug", skip_all, fields(certificate_digest = ?certificate.digest()))]
     async fn process_certificate(&mut self, certificate: Certificate) -> DagResult<()> {
+        if self.certificate_store.read(certificate.digest())?.is_some() {
+            // Certificate already processed.
+            return Ok(());
+        }
+
         debug!(
             "Processing {:?} round:{:?}",
             certificate,
@@ -452,24 +460,23 @@ impl Core {
             .await
             .map_err(|_| DagError::ShuttingDown)?;
 
-        // Process the header embedded in the certificate if we haven't already voted for it (if we already
-        // voted, it means we already processed it). Since this header got certified, we are sure that all
-        // the data it refers to (ie. its payload and its parents) are available. We can thus continue the
-        // processing of the certificate even if we don't have them in store right now.
+        // Process the header embedded in the certificate if we haven't already voted for it (if we already voted, it means we already processed it),
+        // or processed it as a certificate.
+        // Since this header got certified, we are sure that all the data it refers to (ie. its payload and its parents) are available.
+        // We can thus continue the processing of the certificate even if we don't have them in store right now.
         if !self
             .processing
             .get(&certificate.header.round)
             .map_or_else(|| false, |x| x.contains(&certificate.header.id))
         {
             // This function may still throw an error if the storage fails.
-            self.process_header(&certificate.header).await?;
+            self.process_header_internal(&certificate.header, /* signed */ true)
+                .await?;
         }
 
         // Ensure we have all the ancestors of this certificate yet (if we didn't already garbage collect them).
         // If we don't, the synchronizer will gather them and trigger re-processing of this certificate.
-        if certificate.round() > self.gc_round + 1
-            && !self.synchronizer.deliver_certificate(&certificate).await?
-        {
+        if !self.synchronizer.deliver_certificate(&certificate).await? {
             debug!(
                 "Processing of {:?} suspended: missing ancestors",
                 certificate
@@ -604,14 +611,6 @@ impl Core {
                 received: certificate.epoch()
             }
         );
-        ensure!(
-            self.gc_round < certificate.round(),
-            DagError::TooOld(
-                certificate.digest().into(),
-                certificate.round(),
-                self.gc_round
-            )
-        );
 
         // Verify the certificate (and the embedded header).
         certificate
@@ -690,7 +689,12 @@ impl Core {
                 // We receive here loopback certificates from the `CertificateWaiter`. Those are certificates for which
                 // we interrupted execution (we were missing some of their ancestors) and we are now ready to resume
                 // processing.
-                Some(certificate) = self.rx_certificate_waiter.recv() => self.process_certificate(certificate).await,
+                Some(certificate) = self.rx_certificates_loopback.recv() => {
+                    match self.sanitize_certificate(&certificate).await {
+                        Ok(()) =>  self.process_certificate(certificate).await,
+                        error => error
+                    }
+                },
 
                 // We also receive here our new headers created by the `Proposer`.
                 Some(header) = self.rx_proposer.recv() => self.process_own_header(header).await,

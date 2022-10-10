@@ -71,7 +71,7 @@ pub struct HeaderWaiter {
     /// Watch channel to reconfigure the committee.
     rx_reconfigure: watch::Receiver<ReconfigureNotification>,
     /// Receives sync commands from the `Synchronizer`.
-    rx_synchronizer: Receiver<WaiterMessage>,
+    rx_header_waiter: Receiver<WaiterMessage>,
     /// Loops back to the core headers for which we got all parents and batches.
     tx_core: Sender<Header>,
 
@@ -110,7 +110,7 @@ impl HeaderWaiter {
         sync_retry_delay: Duration,
         sync_retry_nodes: usize,
         rx_reconfigure: watch::Receiver<ReconfigureNotification>,
-        rx_synchronizer: Receiver<WaiterMessage>,
+        rx_header_waiter: Receiver<WaiterMessage>,
         tx_core: Sender<Header>,
         metrics: Arc<PrimaryMetrics>,
         primary_network: P2pNetwork,
@@ -127,7 +127,7 @@ impl HeaderWaiter {
                 sync_retry_delay,
                 sync_retry_nodes,
                 rx_reconfigure,
-                rx_synchronizer,
+                rx_header_waiter,
                 tx_core,
                 network: primary_network,
                 parent_requests: HashMap::new(),
@@ -192,7 +192,7 @@ impl HeaderWaiter {
             let mut attempt_garbage_collection = false;
 
             tokio::select! {
-                Some(message) = self.rx_synchronizer.recv(), if waiting.available_permits() > 0 => {
+                Some(message) = self.rx_header_waiter.recv(), if waiting.available_permits() > 0 => {
                     match message {
                         WaiterMessage::SyncBatches(missing, header) => {
                             debug!("Synching the payload of {header}");
