@@ -106,7 +106,10 @@ impl EventReadApiServer for EventReadApiImpl {
         let reverse = order == Ordering::Descending;
         let limit = cap_page_limit(limit)?;
         // Retrieve 1 extra item for next cursor
-        let mut data = self.state.get_events(query, cursor, limit, reverse).await?;
+        let mut data = self
+            .state
+            .get_events(query, cursor, limit + 1, reverse)
+            .await?;
         let next_cursor = data.get(limit).map(|event| event.seq_num);
         data.truncate(limit);
         Ok(EventPage { data, next_cursor })

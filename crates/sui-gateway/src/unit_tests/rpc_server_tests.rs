@@ -23,6 +23,7 @@ use sui_types::base_types::ObjectID;
 use sui_types::base_types::TransactionDigest;
 use sui_types::gas_coin::GAS;
 use sui_types::messages::ExecuteTransactionRequestType;
+use sui_types::object::Owner;
 use sui_types::query::{EventQuery, Ordering, TransactionQuery};
 use sui_types::sui_serde::Base64;
 use sui_types::SUI_FRAMEWORK_ADDRESS;
@@ -432,14 +433,85 @@ async fn test_get_fullnode_events() -> Result<(), anyhow::Error> {
         }
     }
 
-    // test get_transactions_in_range
-    let tx = client
+    // test get all events ascending
+    let page1 = client
         .event_api()
-        .get_events(EventQuery::All, Some(10), Some(11), Ordering::Descending)
+        .get_events(EventQuery::All, Some(2), Some(3), Ordering::Ascending)
         .await
         .unwrap();
+    assert_eq!(3, page1.data.len());
+    assert_eq!(Some(5), page1.next_cursor);
+    let page2 = client
+        .event_api()
+        .get_events(EventQuery::All, Some(5), Some(20), Ordering::Ascending)
+        .await
+        .unwrap();
+    assert_eq!(16, page2.data.len());
+    assert_eq!(None, page2.next_cursor);
 
-    println!("{:#?}", tx);
+    // test get all events descending
+    let page1 = client
+        .event_api()
+        .get_events(EventQuery::All, None, Some(3), Ordering::Descending)
+        .await
+        .unwrap();
+    assert_eq!(3, page1.data.len());
+    assert_eq!(Some(17), page1.next_cursor);
+    let page2 = client
+        .event_api()
+        .get_events(EventQuery::All, Some(16), None, Ordering::Descending)
+        .await
+        .unwrap();
+    assert_eq!(16, page2.data.len());
+    assert_eq!(None, page2.next_cursor);
+
+    // test get sender events
+    let page = client
+        .event_api()
+        .get_events(
+            EventQuery::Sender(cluster.accounts[0]),
+            None,
+            Some(10),
+            Ordering::Ascending,
+        )
+        .await
+        .unwrap();
+    assert_eq!(4, page.data.len());
+
+    // test get recipient events
+    let page = client
+        .event_api()
+        .get_events(
+            EventQuery::Recipient(Owner::AddressOwner(cluster.accounts[1])),
+            None,
+            Some(10),
+            Ordering::Ascending,
+        )
+        .await
+        .unwrap();
+    assert_eq!(4, page.data.len());
+
+    let object = client
+        .read_api()
+        .get_objects_owned_by_address(cluster.accounts[2])
+        .await
+        .unwrap()
+        .first()
+        .unwrap()
+        .object_id;
+
+    // test get object events
+    let page = client
+        .event_api()
+        .get_events(
+            EventQuery::Object(object),
+            None,
+            Some(10),
+            Ordering::Ascending,
+        )
+        .await
+        .unwrap();
+    assert_eq!(1, page.data.len());
 
     Ok(())
 }

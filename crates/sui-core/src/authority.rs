@@ -53,7 +53,9 @@ use narwhal_config::{
 use narwhal_executor::{ExecutionIndices, ExecutionState};
 use sui_adapter::adapter;
 use sui_config::genesis::Genesis;
-use sui_json_rpc_types::{SuiEvent, SuiEventEnvelope, SuiTransactionEffects};
+use sui_json_rpc_types::{
+    type_and_fields_from_move_struct, SuiEvent, SuiEventEnvelope, SuiTransactionEffects,
+};
 use sui_simulator::nondeterministic;
 use sui_storage::{
     event_store::{EventStore, EventStoreType, StoredEvent},
@@ -1901,7 +1903,7 @@ impl AuthorityState {
         reverse: bool,
     ) -> Result<Vec<SuiEventEnvelope>, anyhow::Error> {
         let es = self.get_event_store().ok_or(SuiError::NoEventStore)?;
-        let cursor = cursor.unwrap_or_else(|| if reverse { u64::MAX } else { u64::MIN });
+        let cursor = cursor.unwrap_or(if reverse { i64::MAX as u64 } else { u64::MIN });
 
         let stored_events = match query {
             EventQuery::All => es.all_events(cursor, limit, reverse).await?,
@@ -1950,10 +1952,11 @@ impl AuthorityState {
                 type_, fields, bcs, ..
             } = &mut event.event
             {
-                let struct_tag = parse_struct_tag(&type_)?;
+                let struct_tag = parse_struct_tag(type_)?;
                 let event =
-                    Event::move_event_to_move_struct(&struct_tag, &bcs, &*self.module_cache)?;
-                *fields = Some(event.into())
+                    Event::move_event_to_move_struct(&struct_tag, bcs, &*self.module_cache)?;
+                let (_, event) = type_and_fields_from_move_struct(&struct_tag, event);
+                *fields = Some(event)
             }
         }
         Ok(events)

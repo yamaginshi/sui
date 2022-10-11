@@ -785,17 +785,13 @@ impl SuiMoveObject for SuiParsedMoveObject {
     }
 }
 
-impl SuiParsedMoveObject {
-    fn try_type_and_fields_from_move_struct(
-        type_: &StructTag,
-        move_struct: MoveStruct,
-    ) -> Result<(String, SuiMoveStruct), anyhow::Error> {
-        Ok(match move_struct.into() {
-            SuiMoveStruct::WithTypes { type_, fields } => {
-                (type_, SuiMoveStruct::WithFields(fields))
-            }
-            fields => (type_.to_string(), fields),
-        })
+pub fn type_and_fields_from_move_struct(
+    type_: &StructTag,
+    move_struct: MoveStruct,
+) -> (String, SuiMoveStruct) {
+    match move_struct.into() {
+        SuiMoveStruct::WithTypes { type_, fields } => (type_, SuiMoveStruct::WithFields(fields)),
+        fields => (type_.to_string(), fields),
     }
 }
 
@@ -1939,10 +1935,7 @@ impl SuiEvent {
                 let (type_, fields) = if let Ok(move_struct) =
                     Event::move_event_to_move_struct(&type_, &contents, resolver)
                 {
-                    let (type_, field) = SuiParsedMoveObject::try_type_and_fields_from_move_struct(
-                        &type_,
-                        move_struct,
-                    )?;
+                    let (type_, field) = type_and_fields_from_move_struct(&type_, move_struct);
                     (type_, Some(field))
                 } else {
                     (type_.to_string(), None)

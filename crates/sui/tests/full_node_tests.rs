@@ -11,8 +11,9 @@ use move_core_types::value::MoveStructLayout;
 use prometheus::Registry;
 use sui::client_commands::{SuiClientCommandResult, SuiClientCommands};
 use sui_json_rpc_types::{
-    EventPage, SuiEvent, SuiEventEnvelope, SuiEventFilter, SuiExecuteTransactionResponse,
-    SuiExecutionStatus, SuiMoveStruct, SuiMoveValue, SuiTransactionFilter, SuiTransactionResponse,
+    type_and_fields_from_move_struct, EventPage, SuiEvent, SuiEventEnvelope, SuiEventFilter,
+    SuiExecuteTransactionResponse, SuiExecutionStatus, SuiMoveStruct, SuiMoveValue,
+    SuiTransactionFilter, SuiTransactionResponse,
 };
 use sui_macros::*;
 use sui_node::SuiNode;
@@ -560,13 +561,14 @@ async fn test_full_node_sub_and_query_move_event_ok() -> Result<(), anyhow::Erro
     let type_tag = parse_struct_tag(&type_).unwrap();
     let expected_parsed_event =
         Event::move_event_to_move_struct(&type_tag, &bcs, &*node.state().module_cache).unwrap();
-
+    let (_, expected_parsed_event) =
+        type_and_fields_from_move_struct(&type_tag, expected_parsed_event);
     let expected_event = SuiEvent::MoveEvent {
         package_id: ObjectID::from_hex_literal("0x2").unwrap(),
         transaction_module: "devnet_nft".into(),
         sender,
         type_,
-        fields: Some(expected_parsed_event.into()),
+        fields: Some(expected_parsed_event),
         bcs,
     };
 
