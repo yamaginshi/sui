@@ -23,7 +23,7 @@ use sui_types::base_types::ObjectID;
 use sui_types::base_types::TransactionDigest;
 use sui_types::gas_coin::GAS;
 use sui_types::messages::ExecuteTransactionRequestType;
-use sui_types::query::{Ordering, TransactionQuery};
+use sui_types::query::{EventQuery, Ordering, TransactionQuery};
 use sui_types::sui_serde::Base64;
 use sui_types::SUI_FRAMEWORK_ADDRESS;
 use test_utils::network::TestClusterBuilder;
@@ -384,6 +384,62 @@ async fn test_get_fullnode_transaction() -> Result<(), anyhow::Error> {
             .transaction_digest
             == response.effects.transaction_digest))
     }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_get_fullnode_events() -> Result<(), anyhow::Error> {
+    let port = get_available_port();
+    let cluster = TestClusterBuilder::new()
+        .set_fullnode_rpc_port(port)
+        .build()
+        .await
+        .unwrap();
+
+    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+    let client = SuiClient::new_rpc_client(&format!("http://{}", addr), None).await?;
+    let keystore_path = cluster.swarm.dir().join(SUI_KEYSTORE_FILENAME);
+    let keystore = Keystore::from(FileBasedKeystore::new(&keystore_path).unwrap());
+    let mut tx_responses = Vec::new();
+
+    for address in cluster.accounts.iter() {
+        let objects = client
+            .read_api()
+            .get_objects_owned_by_address(*address)
+            .await
+            .unwrap();
+        let gas_id = objects.last().unwrap().object_id;
+
+        // Make some transactions
+        for oref in &objects[..objects.len() - 1] {
+            let data = client
+                .transaction_builder()
+                .transfer_object(*address, oref.object_id, Some(gas_id), 1000, *address)
+                .await?;
+            let tx = to_sender_signed_transaction(data, keystore.get_key(address).unwrap());
+
+            let response = client
+                .quorum_driver()
+                .execute_transaction(
+                    tx,
+                    Some(ExecuteTransactionRequestType::WaitForLocalExecution),
+                )
+                .await
+                .unwrap();
+
+            tx_responses.push(response);
+        }
+    }
+
+    // test get_transactions_in_range
+    let tx = client
+        .event_api()
+        .get_events(EventQuery::All, Some(10), Some(11), Ordering::Descending)
+        .await
+        .unwrap();
+
+    println!("{:#?}", tx);
 
     Ok(())
 }

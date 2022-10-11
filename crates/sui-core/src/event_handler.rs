@@ -33,10 +33,13 @@ pub struct EventHandler {
 }
 
 impl EventHandler {
-    pub fn new(validator_store: Arc<AuthorityStore>, event_store: Arc<EventStoreType>) -> Self {
+    pub fn new(
+        event_store: Arc<EventStoreType>,
+        module_cache: Arc<SyncModuleCache<ResolverWrapper<AuthorityStore>>>,
+    ) -> Self {
         let streamer = Streamer::spawn(EVENT_DISPATCH_BUFFER_SIZE);
         Self {
-            module_cache: Arc::new(SyncModuleCache::new(ResolverWrapper(validator_store))),
+            module_cache,
             event_streamer: streamer,
             event_store,
         }
@@ -54,10 +57,10 @@ impl EventHandler {
             .iter()
             .map(|e| self.create_envelope(e, effects.transaction_digest, seq_num, timestamp_ms))
             .collect();
-        let envelopes = res?;
+        let mut envelopes = res?;
 
         // Ingest all envelopes together at once (for efficiency) into Event Store
-        self.event_store.add_events(&envelopes).await?;
+        self.event_store.add_events(&mut envelopes).await?;
         trace!(
             num_events = envelopes.len(),
             tx_digest =? effects.transaction_digest,

@@ -447,6 +447,7 @@ impl RpcExampleProvider {
             amount: Some(100),
         };
         let events = vec![SuiEventEnvelope {
+            seq_num: 10,
             timestamp: std::time::Instant::now().elapsed().as_secs(),
             tx_digest: Some(*tx_digest),
             event: sui_event.clone(),
@@ -594,6 +595,7 @@ impl RpcExampleProvider {
         let tx = Transaction::new(data, signature);
 
         let event = SuiEventEnvelope {
+            seq_num: 20,
             timestamp: ts,
             tx_digest: Some(*tx.digest()),
             event: SuiEvent::MoveEvent {

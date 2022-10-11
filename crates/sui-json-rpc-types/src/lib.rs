@@ -36,7 +36,7 @@ use sui_types::base_types::{
 use sui_types::committee::EpochId;
 use sui_types::crypto::{AuthorityStrongQuorumSignInfo, SignableBytes, Signature};
 use sui_types::error::SuiError;
-use sui_types::event::{Event, TransferType};
+use sui_types::event::{Event, EventSequenceNumber, TransferType};
 use sui_types::event::{EventEnvelope, EventType};
 use sui_types::filter::{EventFilter, TransactionFilter};
 use sui_types::gas::GasCostSummary;
@@ -60,6 +60,8 @@ mod rpc_types_tests;
 
 pub type SuiMoveTypeParameterIndex = u16;
 pub type TransactionsPage = Page<TransactionDigest, TransactionDigest>;
+
+pub type EventPage = Page<SuiEventEnvelope, EventSequenceNumber>;
 
 #[derive(Serialize, Deserialize, Debug, JsonSchema)]
 pub enum SuiMoveAbility {
@@ -1854,6 +1856,7 @@ pub struct OwnedObjectRef {
 #[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename = "EventEnvelope", rename_all = "camelCase")]
 pub struct SuiEventEnvelope {
+    pub seq_num: EventSequenceNumber,
     /// UTC timestamp in milliseconds since epoch (1/1/1970)
     pub timestamp: u64,
     /// Transaction digest of associated transaction, if any

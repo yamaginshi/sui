@@ -29,9 +29,10 @@ fn test_move_event_filter() {
         contents: GasCoin::new(event_coin_id, 10000).to_bcs_bytes(),
     };
     let envelope = EventEnvelope {
+        seq_num: 0,
         timestamp: 0,
         tx_digest: Some(TransactionDigest::random()),
-        seq_num: 0,
+        tx_seq_num: 0,
         event: move_event,
         move_struct_json_value: Some(json!(BTreeMap::from([("balance", 10000)]))),
     };
@@ -85,9 +86,10 @@ fn test_transfer_filter() {
         amount: None,
     };
     let envelope = EventEnvelope {
+        seq_num: 1,
         timestamp: 0,
         tx_digest: Some(TransactionDigest::random()),
-        seq_num: 1,
+        tx_seq_num: 1,
         event: move_event,
         move_struct_json_value: None,
     };
@@ -119,9 +121,10 @@ fn test_publish_filter() {
     // Create a test publish event.
     let move_event = Event::Publish { sender, package_id };
     let envelope = EventEnvelope {
+        seq_num: 0,
         timestamp: 0,
         tx_digest: Some(TransactionDigest::random()),
-        seq_num: 0,
+        tx_seq_num: 0,
         event: move_event,
         move_struct_json_value: None,
     };
@@ -156,9 +159,10 @@ fn test_delete_object_filter() {
         object_id,
     };
     let envelope = EventEnvelope {
+        seq_num: 0,
         timestamp: 0,
         tx_digest: Some(TransactionDigest::random()),
-        seq_num: 0,
+        tx_seq_num: 0,
         event: move_event,
         move_struct_json_value: None,
     };
@@ -197,9 +201,10 @@ fn test_new_object_filter() {
         object_id,
     };
     let envelope = EventEnvelope {
+        seq_num: 0,
         timestamp: 0,
         tx_digest: Some(TransactionDigest::random()),
-        seq_num: 0,
+        tx_seq_num: 0,
         event: move_event,
         move_struct_json_value: None,
     };
@@ -229,9 +234,10 @@ fn test_epoch_change_filter() {
     // Create a test epoch change event.
     let move_event = Event::EpochChange(0);
     let envelope = EventEnvelope {
+        seq_num: 1,
         timestamp: 0,
         tx_digest: Some(TransactionDigest::random()),
-        seq_num: 1,
+        tx_seq_num: 1,
         event: move_event,
         move_struct_json_value: None,
     };
@@ -244,9 +250,10 @@ fn test_checkpoint_filter() {
     // Create a stub move event.
     let move_event = Event::Checkpoint(0);
     let envelope = EventEnvelope {
+        seq_num: 1,
         timestamp: 0,
         tx_digest: Some(TransactionDigest::random()),
-        seq_num: 1,
+        tx_seq_num: 1,
         event: move_event,
         move_struct_json_value: None,
     };

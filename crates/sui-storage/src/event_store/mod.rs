@@ -11,33 +11,31 @@
 //! Events are also archived into checkpoints so this API should support that as well.
 //!
 
+use std::collections::BTreeMap;
+use std::str::FromStr;
+
 use anyhow::anyhow;
 use async_trait::async_trait;
 use enum_dispatch::enum_dispatch;
+use flexstr::SharedStr;
 use futures::prelude::stream::BoxStream;
 use move_core_types::identifier::Identifier;
 use move_core_types::language_storage::ModuleId;
 use move_core_types::value::MoveValue;
 use serde_json::Value;
-use std::collections::BTreeMap;
-use std::str::FromStr;
+use tokio_stream::StreamExt;
+
+pub use sql::SqlEventStore;
 use sui_json_rpc_types::{SuiEvent, SuiEventEnvelope};
 use sui_types::base_types::{ObjectID, SequenceNumber, SuiAddress, TransactionDigest};
 use sui_types::error::SuiError;
 use sui_types::error::SuiError::{StorageCorruptedFieldError, StorageMissingFieldError};
-use sui_types::event::{Event, TransferType};
+use sui_types::event::{Event, EventSequenceNumber, TransferType};
 use sui_types::event::{EventEnvelope, EventType};
 use sui_types::object::Owner;
-use tokio_stream::StreamExt;
 
 pub mod sql;
 pub mod test_utils;
-pub use sql::SqlEventStore;
-
-use flexstr::SharedStr;
-
-/// Maximum number of events one can ask for right now
-pub const EVENT_STORE_QUERY_MAX_LIMIT: usize = 1000;
 
 pub const TRANSFER_TYPE_KEY: &str = "xfer_type";
 pub const OBJECT_VERSION_KEY: &str = "obj_ver";
@@ -47,6 +45,7 @@ pub const AMOUNT_KEY: &str = "amount";
 #[allow(unused)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredEvent {
+    seq_num: u64,
     /// UTC timestamp in milliseconds
     timestamp: u64,
     /// Not present for non-transaction System events (eg EpochChange)
@@ -275,6 +274,7 @@ impl TryInto<SuiEventEnvelope> for StoredEvent {
     type Error = anyhow::Error;
     fn try_into(self) -> Result<SuiEventEnvelope, Self::Error> {
         let timestamp = self.timestamp;
+        let seq_num = self.seq_num;
         let tx_digest = self.tx_digest;
         let event_type_str = self.event_type.as_str();
         let event = match EventType::from_str(event_type_str) {
@@ -293,6 +293,7 @@ impl TryInto<SuiEventEnvelope> for StoredEvent {
             Err(e) => anyhow::bail!("Invalid EventType {event_type_str}: {e:?}"),
         }?;
         Ok(SuiEventEnvelope {
+            seq_num,
             timestamp,
             tx_digest,
             event,
@@ -325,14 +326,22 @@ pub trait EventStore {
     /// which have sequence numbers below the current one will be skipped.  This feature
     /// is intended for deduplication.
     /// Returns Ok(rows_affected).
-    async fn add_events(&self, events: &[EventEnvelope]) -> Result<u64, SuiError>;
+    async fn add_events(&self, events: &mut [EventEnvelope]) -> Result<u64, SuiError>;
 
+    async fn all_events(
+        &self,
+        cursor: EventSequenceNumber,
+        limit: usize,
+        reverse: bool,
+    ) -> Result<Vec<StoredEvent>, SuiError>;
     /// Returns at most `limit` events emitted by a given
     /// transaction, sorted in order emitted.
     async fn events_by_transaction(
         &self,
+        cursor: EventSequenceNumber,
         digest: TransactionDigest,
         limit: usize,
+        reverse: bool,
     ) -> Result<Vec<StoredEvent>, SuiError>;
 
     /// Returns at most `limit` events of a certain EventType
@@ -340,20 +349,20 @@ pub trait EventStore {
     /// sorted in in ascending time.
     async fn events_by_type(
         &self,
-        start_time: u64,
-        end_time: u64,
+        cursor: EventSequenceNumber,
         event_type: EventType,
         limit: usize,
+        reverse: bool,
     ) -> Result<Vec<StoredEvent>, SuiError>;
 
     /// Returns at most `limit` events emitted in a certain Module ID during
     /// [start_time, end_time), sorted in ascending time.
     async fn events_by_module_id(
         &self,
-        start_time: u64,
-        end_time: u64,
+        cursor: EventSequenceNumber,
         module: &ModuleId,
         limit: usize,
+        reverse: bool,
     ) -> Result<Vec<StoredEvent>, SuiError>;
 
     /// Returns at most `limit` events with the move event struct name
@@ -361,49 +370,51 @@ pub trait EventStore {
     /// during [start_time, end_time), sorted in ascending time.
     async fn events_by_move_event_struct_name(
         &self,
-        start_time: u64,
-        end_time: u64,
+        cursor: EventSequenceNumber,
         move_event_struct_name: &str,
         limit: usize,
+        reverse: bool,
     ) -> Result<Vec<StoredEvent>, SuiError>;
 
     /// Returns at most `limit` events associated with a certain sender
     /// emitted during [start_time, end_time), sorted in ascending time.
     async fn events_by_sender(
         &self,
-        start_time: u64,
-        end_time: u64,
+        cursor: EventSequenceNumber,
         sender: &SuiAddress,
         limit: usize,
+        reverse: bool,
     ) -> Result<Vec<StoredEvent>, SuiError>;
 
     /// Returns at most `limit` events associated with a certain recipient
     /// emitted during [start_time, end_time), sorted in ascending time.
     async fn events_by_recipient(
         &self,
-        start_time: u64,
-        end_time: u64,
+        cursor: EventSequenceNumber,
         recipient: &Owner,
         limit: usize,
+        reverse: bool,
     ) -> Result<Vec<StoredEvent>, SuiError>;
 
     /// Returns at most `limit` events associated with a certain object id
     /// emitted during [start_time, end_time), sorted in ascending time.
     async fn events_by_object(
         &self,
-        start_time: u64,
-        end_time: u64,
+        cursor: EventSequenceNumber,
         object: &ObjectID,
         limit: usize,
+        reverse: bool,
     ) -> Result<Vec<StoredEvent>, SuiError>;
 
     /// Generic event iterator that returns events emitted between
     /// [start_time, end_time), sorted in ascending time.
     async fn event_iterator(
         &self,
+        cursor: EventSequenceNumber,
         start_time: u64,
         end_time: u64,
         limit: usize,
+        reverse: bool,
     ) -> Result<Vec<StoredEvent>, SuiError>;
 }
 
