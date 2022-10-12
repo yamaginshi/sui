@@ -6,7 +6,6 @@ use config::Committee;
 use crypto::{NetworkPublicKey, PublicKey};
 use fastcrypto::Hash;
 use futures::{future::try_join_all, stream::FuturesUnordered, StreamExt};
-use itertools::Itertools;
 use network::PrimaryToPrimaryRpc;
 use rand::{rngs::ThreadRng, seq::SliceRandom, Rng};
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
@@ -250,13 +249,8 @@ impl CertificateWaiter {
 
         tokio::task::spawn(async move {
             // Send request to fetch certificates.
-            let mut progression = progression
-                .into_iter()
-                .map(|(name, round)| (round, name))
-                .collect_vec();
-            progression.sort();
             let request = FetchCertificatesRequest {
-                progression,
+                progression: progression.into_iter().collect(),
                 max_items: MAX_CERTIFICATES_TO_FETCH,
             };
             let response = fetch_certificates_helper(
@@ -357,8 +351,8 @@ async fn store_certificates_helper(
         }
     }
 
+    // TODO: wait on a signal from core instead, without timeout.
     let waiters_len = waiters.len();
-    // Timeout should be enough to write the maximum number of certificates.
     let mut timeout = Box::pin(time::sleep(Duration::from_secs(30)));
     let _ = &committee;
     tokio::select! {

@@ -295,6 +295,8 @@ async fn test_fetch_certificates_handler() {
     // Authority 1: 0 1 2
     // Authority 2: 0 1 2 3
     // Authority 3: 0 1 2 3 4
+    // This is unrealistic because in practice a certificate can only be stored with 2f+1 parents
+    // already in store. But this does not matter for testing here.
     let mut authorities = Vec::<PublicKey>::new();
     for i in 0..total_authorities {
         authorities.push(certificates[i].header.author.clone());
@@ -307,24 +309,34 @@ async fn test_fetch_certificates_handler() {
         }
     }
 
-    // Fetch all certificates above rounds [1, 1, 2, 2] for the corresponding authorities.
-    let req = FetchCertificatesRequest {
-        progression: vec![1u64, 1, 3, 3]
-            .into_iter()
-            .zip(authorities.clone().into_iter())
-            .collect_vec(),
-        max_items: 5,
-    };
-    let resp = handler
-        .fetch_certificates(anemo::Request::new(req.clone()))
-        .await
-        .unwrap()
-        .into_body();
-    assert_eq!(
-        resp.certificates
-            .iter()
-            .map(|cert| cert.round())
-            .collect_vec(),
-        vec![2, 4]
-    );
+    // Each test case contains (rounds progression, max items, expected output).
+    let test_cases = vec![
+        (vec![1u64, 1, 2, 2], 4, vec![2, 3, 3, 4]),
+        (vec![1u64, 1, 3, 3], 2, vec![2, 4]),
+        (vec![1u64, 1, 2, 2], 2, vec![2, 3]),
+        (vec![2u64, 2, 2, 2], 3, vec![3, 3, 4]),
+        (vec![2u64, 2, 2, 2], 2, vec![3, 3]),
+    ];
+    for (rounds_progression, max_items, expected_rounds) in test_cases {
+        let req = FetchCertificatesRequest {
+            progression: authorities
+                .clone()
+                .into_iter()
+                .zip(rounds_progression)
+                .collect_vec(),
+            max_items,
+        };
+        let resp = handler
+            .fetch_certificates(anemo::Request::new(req.clone()))
+            .await
+            .unwrap()
+            .into_body();
+        assert_eq!(
+            resp.certificates
+                .iter()
+                .map(|cert| cert.round())
+                .collect_vec(),
+            expected_rounds
+        );
+    }
 }

@@ -139,10 +139,10 @@ impl CertificateStore {
     /// If not found, None is returned as result.
     pub fn read_by_index(
         &self,
+        origin: PublicKey,
         round: Round,
-        authority: PublicKey,
     ) -> StoreResult<Option<Certificate>> {
-        let digest = self.certificate_id_by_origin.get(&(authority, round))?;
+        let digest = self.certificate_id_by_origin.get(&(origin, round))?;
         let digest = match digest {
             Some(d) => d,
             None => {
@@ -311,8 +311,8 @@ impl CertificateStore {
         Ok(certificates)
     }
 
-    /// Retrieves the latest round number of the given origin in store.
-    /// Returns None if there is no certificate for the origin in store.
+    /// Retrieves the last round number of the given origin.
+    /// Returns None if there is no certificate for the origin.
     pub fn last_round_number(&self, origin: &PublicKey) -> StoreResult<Option<Round>> {
         let key = (origin.clone(), Round::MAX);
         if let Some(((name, round), _)) = self
@@ -320,6 +320,23 @@ impl CertificateStore {
             .iter()
             .skip_prior_to(&key)?
             .next()
+        {
+            if &name == origin {
+                return Ok(Some(round));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Retrieves the round number next to the given round for the origin.
+    /// Returns None if there is no more certificate after the specified round.
+    pub fn next_round_number(
+        &self,
+        origin: &PublicKey,
+        round: Round,
+    ) -> StoreResult<Option<Round>> {
+        let key = (origin.clone(), round + 1);
+        if let Some(((name, round), _)) = self.certificate_id_by_origin.iter().skip_to(&key)?.next()
         {
             if &name == origin {
                 return Ok(Some(round));

@@ -254,7 +254,7 @@ async fn fetch_certificates_basic() {
     // Verify the fetch request.
     let mut req = rx_fetch_req.recv().await.unwrap();
     assert_eq!(req.progression.len(), fixture.authorities().count());
-    for (round, _) in &req.progression {
+    for (_, round) in &req.progression {
         assert_eq!(round, &1);
     }
 
@@ -283,7 +283,7 @@ async fn fetch_certificates_basic() {
     loop {
         match rx_fetch_req.try_recv() {
             Ok(r) => {
-                if r.progression[0].0 == 1 {
+                if r.progression[0].1 == 1 {
                     // Drain the fetch requests sent out before the last reply.
                     continue;
                 }
@@ -294,10 +294,12 @@ async fn fetch_certificates_basic() {
         }
     }
     assert_eq!(req.progression.len(), fixture.authorities().count());
-    let mut rounds = Vec::new();
-    for (round, _) in &req.progression {
-        rounds.push(*round);
-    }
+    let mut rounds = req
+        .progression
+        .iter()
+        .map(|(_, round)| round)
+        .cloned()
+        .collect_vec();
     rounds.sort();
     // Expected rounds are calculated from current num_written index.
     assert_eq!(rounds, vec![16, 16, 17, 17]);
@@ -328,7 +330,7 @@ async fn fetch_certificates_basic() {
     loop {
         match rx_fetch_req.try_recv() {
             Ok(r) => {
-                if r.progression[0].0 == 16 || r.progression[0].0 == 17 {
+                if r.progression[0].1 == 16 || r.progression[0].1 == 17 {
                     // Drain the fetch requests sent out before the last reply.
                     continue;
                 }

@@ -34,7 +34,8 @@ use network::metrics::MetricsMakeCallbackHandler;
 use network::P2pNetwork;
 use prometheus::Registry;
 use std::{
-    collections::{BTreeMap, BTreeSet, VecDeque},
+    cmp::Reverse,
+    collections::{BTreeMap, BinaryHeap},
     net::Ipv4Addr,
     sync::Arc,
 };
@@ -586,72 +587,58 @@ impl PrimaryToPrimary for PrimaryReceiverHandler {
         .map_err(|e| anemo::rpc::Status::internal(e.to_string()))
     }
 
-    #[allow(clippy::mutable_key_type)]
     async fn fetch_certificates(
         &self,
         request: anemo::Request<FetchCertificatesRequest>,
     ) -> Result<anemo::Response<FetchCertificatesResponse>, anemo::rpc::Status> {
         let request = request.into_body();
-        let mut progression: VecDeque<_> = request.progression.into();
-        let mut num_items: usize = 0;
         let mut response = FetchCertificatesResponse {
             certificates: Vec::new(),
         };
-        if progression.is_empty() {
+        if request.progression.is_empty() || request.max_items == 0 {
             return Ok(anemo::Response::new(response));
         }
-        progression.make_contiguous().sort();
 
-        // Start collecting certificates to be returned, at 1 past the lowest round from the requestor.
-        let (mut round, name) = progression.pop_front().unwrap();
-        round += 1;
-        // Keep track of the authorities that certificates should be collected.
-        let mut authorities = BTreeSet::<PublicKey>::new();
-        authorities.insert(name);
-        // TODO: make looking up last round from store more efficient.
-        let last_round = self
-            .certificate_store
-            .last_round()
-            .map_err(|e| anemo::rpc::Status::from_error(Box::new(e)))?
-            .first()
-            .unwrap()
-            .round();
-
-        loop {
-            if num_items == request.max_items {
-                // Terminate certificate collection when max is reached.
-                break;
+        // Use a min-queue for (round, authority) to keep track of the next certificate to fetch.
+        // If the requestor is providing its current round on all authorities, it should be able to
+        // process certificates returned in this order without any missing parents.
+        //
+        // Compared to fetching certificates iteratatively round by round, using a heap is simpler,
+        // and avoids the pathological case of iterating through many missing rounds of a downed authority.
+        let mut fetch_queue = BinaryHeap::new();
+        for (authority, round) in request.progression.into_iter() {
+            let next_round = self
+                .certificate_store
+                .next_round_number(&authority, round)
+                .map_err(|e| anemo::rpc::Status::from_error(Box::new(e)))?;
+            if let Some(r) = next_round {
+                fetch_queue.push(Reverse((r, authority)));
             }
-            if round > last_round {
-                // Terminate certificate collection past the last local round.
-                break;
-            }
-            // If the requestor does not have certificates at higher rounds for a given authority,
-            // add the authority to the set which certificates should be collected.
-            while let Some((r, _)) = progression.front() {
-                if *r + 1 == round {
-                    let (_, name) = progression.pop_front().unwrap();
-                    authorities.insert(name);
-                    continue;
-                }
-                break;
-            }
-            let mut certs: Vec<Certificate> = authorities
-                .clone()
-                .into_iter()
-                .map_while(
-                    |name| match self.certificate_store.read_by_index(round, name) {
-                        Ok(val) => val,
-                        Err(_) => None,
-                    },
-                )
-                .collect();
-            let items_for_round = certs.len().min(request.max_items - num_items);
-            certs.truncate(items_for_round);
-            response.certificates.extend(certs);
-            num_items += items_for_round;
-            round += 1;
         }
+
+        while let Some(Reverse((round, authority))) = fetch_queue.pop() {
+            match self
+                .certificate_store
+                .read_by_index(authority.clone(), round)
+                .map_err(|e| anemo::rpc::Status::from_error(Box::new(e)))?
+            {
+                Some(cert) => {
+                    response.certificates.push(cert);
+                    let next_round = self
+                        .certificate_store
+                        .next_round_number(&authority, round)
+                        .map_err(|e| anemo::rpc::Status::from_error(Box::new(e)))?;
+                    if let Some(r) = next_round {
+                        fetch_queue.push(Reverse((r, authority)));
+                    }
+                }
+                None => continue,
+            };
+            if response.certificates.len() == request.max_items {
+                break;
+            }
+        }
+
         Ok(anemo::Response::new(response))
     }
 }
