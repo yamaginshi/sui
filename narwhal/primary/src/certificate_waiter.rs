@@ -117,16 +117,17 @@ impl CertificateWaiter {
                         }
                     }
 
+                    // The header should have been verified as part of the certificate.
                     match self.certificate_store.last_round_number(&header.author) {
                         Ok(Some(r)) => {
                             if r >= header.round {
                                 // Ignore fetch request. Possibly the certificate was processed while the message is in the queue.
                                 continue;
                             }
+                            // Otherwise, continue to update fetch target.
                         },
                         Ok(None) => {
-                            error!("Header author should be in the committee, but no certificate is found for {}", header.author);
-                            continue;
+                            // The authority has no update since genesis. Continue to update fetch target.
                         },
                         Err(e) => {
                             warn!("Failed to read latest round for {}: {}", header.author, e);
@@ -175,6 +176,9 @@ impl CertificateWaiter {
         }
     }
 
+    // Starts a task to fetch missing certificates from other primaries.
+    // A call to kick() can be triggered by a certificate with missing parents or the end of a fetch task.
+    // Each iterations of kick() updates the target rounds, and iterations will continue until there is no more target rounds to catch up to.
     #[allow(clippy::mutable_key_type)]
     fn kick(&mut self) {
         let progression = match self.read_round_progression() {
@@ -279,8 +283,9 @@ impl CertificateWaiter {
     fn read_round_progression(&self) -> DagResult<BTreeMap<PublicKey, Round>> {
         let mut progression = BTreeMap::new();
         for (name, _) in self.committee.authorities() {
+            // Last round is 0 (genesis) when authority is not found in store.
             let last_round = self.certificate_store.last_round_number(name)?.unwrap_or(0);
-            *progression.entry(name.clone()).or_default() = last_round;
+            progression.insert(name.clone(), last_round);
         }
         Ok(progression)
     }
@@ -320,7 +325,9 @@ async fn fetch_certificates_helper(
                     }
                     None => {}
                 },
-                _ = &mut interval => {}
+                _ = &mut interval => {
+                    debug!("fetch_certificates_helper: no response within timeout. Sending out a new fetch request.");
+                }
             };
         }
     }
@@ -354,7 +361,7 @@ async fn store_certificates_helper(
     // TODO: wait on a signal from core instead, without timeout.
     let waiters_len = waiters.len();
     let mut timeout = Box::pin(time::sleep(Duration::from_secs(30)));
-    let _ = &committee;
+    let epoch = committee.epoch();
     tokio::select! {
         result = try_join_all(waiters) => {
             if let Err(e) = result {
@@ -362,12 +369,12 @@ async fn store_certificates_helper(
                 return Err(DagError::from(e));
             }
             metrics.certificate_waiter_num_certificates_processed
-            .with_label_values(&[&committee.epoch.to_string()]).add(waiters_len as i64);
+            .with_label_values(&[&epoch.to_string()]).add(waiters_len as i64);
             trace!("Done writing {} fetched certificates", waiters_len);
         },
         _ = &mut timeout => {
             metrics.certificate_waiter_processing_timed_out
-            .with_label_values(&[&committee.epoch.to_string()]).inc();
+            .with_label_values(&[&epoch.to_string()]).inc();
             warn!("Processing fetched certificates timed out");
         }
     };
