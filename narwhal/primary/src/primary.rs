@@ -148,7 +148,7 @@ impl Primary {
             &primary_channel_metrics.tx_headers_loopback_total,
         );
         let (tx_certificates_loopback, rx_certificates_loopback) = channel_with_total(
-            CHANNEL_CAPACITY,
+            1, // Only one inflight item is possible.
             &primary_channel_metrics.tx_certificates_loopback,
             &primary_channel_metrics.tx_certificates_loopback_total,
         );
@@ -346,7 +346,7 @@ impl Primary {
             tx_reconfigure.subscribe(),
             /* rx_primaries */ rx_primary_messages,
             /* rx_header_waiter */ rx_headers_loopback,
-            /* rx_certificates_loopback */ rx_certificates_loopback,
+            rx_certificates_loopback,
             /* rx_proposer */ rx_headers,
             tx_consensus,
             /* tx_proposer */ tx_parents,

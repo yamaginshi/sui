@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 use crate::{
     aggregators::{CertificatesAggregator, VotesAggregator},
+    certificate_waiter::CertificateLoopbackMessage,
     metrics::PrimaryMetrics,
     primary::PrimaryMessage,
     synchronizer::Synchronizer,
@@ -59,7 +60,7 @@ pub struct Core {
     /// Receives loopback headers from the `HeaderWaiter`.
     rx_header_waiter: Receiver<Header>,
     /// Receives loopback certificates from the `CertificateWaiter`.
-    rx_certificates_loopback: Receiver<Certificate>,
+    rx_certificates_loopback: Receiver<CertificateLoopbackMessage>,
     /// Receives our newly created headers from the `Proposer`.
     rx_proposer: Receiver<Header>,
     /// Output all certificates to the consensus layer.
@@ -108,7 +109,7 @@ impl Core {
         rx_committee: watch::Receiver<ReconfigureNotification>,
         rx_primaries: Receiver<PrimaryMessage>,
         rx_header_waiter: Receiver<Header>,
-        rx_certificates_loopback: Receiver<Certificate>,
+        rx_certificates_loopback: Receiver<CertificateLoopbackMessage>,
         rx_proposer: Receiver<Header>,
         tx_consensus: Sender<Certificate>,
         tx_proposer: Sender<(Vec<Certificate>, Round, Epoch)>,
@@ -689,11 +690,19 @@ impl Core {
                 // We receive here loopback certificates from the `CertificateWaiter`. Those are certificates for which
                 // we interrupted execution (we were missing some of their ancestors) and we are now ready to resume
                 // processing.
-                Some(certificate) = self.rx_certificates_loopback.recv() => {
-                    match self.sanitize_certificate(&certificate).await {
-                        Ok(()) =>  self.process_certificate(certificate).await,
-                        error => error
-                    }
+                Some(message) = self.rx_certificates_loopback.recv() => {
+                    let mut result = Ok(());
+                    for cert in message.certificates {
+                        result = match self.sanitize_certificate(&cert).await {
+                            Ok(()) => self.process_certificate(cert).await,
+                            error => error
+                        };
+                        if result.is_err() {
+                            break;
+                        }
+                    };
+                    message.done.send(()).expect("Failed to signal back to CertificateWaiter");
+                    result
                 },
 
                 // We also receive here our new headers created by the `Proposer`.

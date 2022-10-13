@@ -1,7 +1,7 @@
 // Copyright (c) 2021, Facebook, Inc. and its affiliates
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
-use crate::{CertificateDigest, HeaderDigest, Round};
+use crate::{HeaderDigest, Round};
 use config::Epoch;
 use fastcrypto::Digest;
 use store::StoreError;
@@ -76,11 +76,8 @@ pub enum DagError {
     #[error("Invalid epoch (expected {expected}, received {received})")]
     InvalidEpoch { expected: Epoch, received: Epoch },
 
-    #[error("Fetched certificate {0} is missing parent {1}")]
-    FetchedCertificateMissingParents(CertificateDigest, CertificateDigest),
-
-    #[error("Fetched certificates processing timed out: round {0}, {1} certificates")]
-    FetchedCertificateProcessingTimedOut(Round, usize),
+    #[error("Too many certificates in the FetchCertificatesResponse {0} > {1}")]
+    TooManyFetchedCertificatesReturned(usize, usize),
 
     #[error("System shutting down")]
     ShuttingDown,

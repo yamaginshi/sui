@@ -4,18 +4,17 @@
 use crate::metrics::PrimaryMetrics;
 use config::Committee;
 use crypto::{NetworkPublicKey, PublicKey};
-use fastcrypto::Hash;
-use futures::{future::try_join_all, stream::FuturesUnordered, StreamExt};
+use futures::{stream::FuturesUnordered, Future, FutureExt, StreamExt};
 use network::PrimaryToPrimaryRpc;
 use rand::{rngs::ThreadRng, seq::SliceRandom, Rng};
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, future::pending, pin::Pin, sync::Arc, time::Duration};
 use storage::CertificateStore;
 use tokio::{
-    sync::{mpsc, watch},
-    task::JoinHandle,
+    sync::{oneshot, watch},
+    task::{JoinError, JoinHandle},
     time::{self, Instant},
 };
-use tracing::{debug, error, instrument, trace, warn};
+use tracing::{debug, instrument, trace, warn};
 use types::{
     error::{DagError, DagResult},
     metered_channel::{Receiver, Sender},
@@ -30,9 +29,18 @@ pub mod certificate_waiter_tests;
 // Maximum number of certficates to fetch with one request.
 const MAX_CERTIFICATES_TO_FETCH: usize = 1000;
 
+/// Message format from CertificateWaiter to core on the loopback channel.
+pub struct CertificateLoopbackMessage {
+    /// Certificates to be processed by the core.
+    /// In normal case processing the certificates in order should not encounter any missing parent.
+    pub certificates: Vec<Certificate>,
+    /// Used by core to signal back that it is done with the certificates.
+    pub done: oneshot::Sender<()>,
+}
+
 /// When there are certificates missing from local store, e.g. discovered when a received certificate has missing parents,
 /// CertificateWaiter is responsible for fetching missing certificates from other primaries.
-pub struct CertificateWaiter {
+pub(crate) struct CertificateWaiter {
     /// Identity of the current authority.
     name: PublicKey,
     /// The committee information.
@@ -45,21 +53,14 @@ pub struct CertificateWaiter {
     rx_reconfigure: watch::Receiver<ReconfigureNotification>,
     /// Receives certificates with missing parents from the `Synchronizer`.
     rx_certificate_waiter: Receiver<Certificate>,
-    /// Kicks start a certificate fetching task, after receiving a certificate with missing parents.
-    /// Sending to this channel should use `try_send()`, because only one pending message is needed.
-    tx_kick_from_cert: mpsc::Sender<()>,
-    rx_kick_from_cert: mpsc::Receiver<()>,
-    /// Kicks start a certificate fetching task, after finishing the current fetch task.
-    /// Sending to this channel should use `send()`. When a fetch task is finishing, the channel should be empty.
-    /// The purpose is to ensure a new fetch task is started after the previous fetch task ends.
-    tx_kick_from_fetch: mpsc::Sender<()>,
-    rx_kick_from_fetch: mpsc::Receiver<()>,
     /// Loops fetched certificates back to the core. Certificates are ensured to have all parents.
-    tx_certificates_loopback: Sender<Certificate>,
+    tx_certificates_loopback: Sender<CertificateLoopbackMessage>,
     /// Map of validator to target rounds that local store must catch up to.
-    target: BTreeMap<PublicKey, Round>,
+    targets: BTreeMap<PublicKey, Round>,
     /// Keeps the handle to the inflight fetch certificates task.
-    fetch_certificates_task: Option<JoinHandle<()>>,
+    /// Contains a pending future that never returns, and at most 1 other task.
+    fetch_certificates_task:
+        FuturesUnordered<Pin<Box<dyn Future<Output = Result<(), JoinError>> + Send>>>,
     /// The metrics handler
     metrics: Arc<PrimaryMetrics>,
 }
@@ -73,12 +74,13 @@ impl CertificateWaiter {
         certificate_store: CertificateStore,
         rx_reconfigure: watch::Receiver<ReconfigureNotification>,
         rx_certificate_waiter: Receiver<Certificate>,
-        tx_certificates_loopback: Sender<Certificate>,
+        tx_certificates_loopback: Sender<CertificateLoopbackMessage>,
         metrics: Arc<PrimaryMetrics>,
     ) -> JoinHandle<()> {
+        // Add a future that never returns to fetch_certificates_task, so it is blocked when empty.
+        let fetch_certificates_task = FuturesUnordered::new();
+        fetch_certificates_task.push(pending().boxed());
         tokio::spawn(async move {
-            let (tx_kick_from_cert, rx_kick_from_cert) = mpsc::channel(1);
-            let (tx_kick_from_fetch, rx_kick_from_fetch) = mpsc::channel(1);
             Self {
                 name,
                 committee,
@@ -86,13 +88,9 @@ impl CertificateWaiter {
                 certificate_store,
                 rx_reconfigure,
                 rx_certificate_waiter,
-                tx_kick_from_cert,
-                rx_kick_from_cert,
-                tx_kick_from_fetch,
-                rx_kick_from_fetch,
                 tx_certificates_loopback,
-                target: BTreeMap::new(),
-                fetch_certificates_task: None,
+                targets: BTreeMap::new(),
+                fetch_certificates_task,
                 metrics,
             }
             .run()
@@ -110,7 +108,7 @@ impl CertificateWaiter {
                     }
                     // Unnecessary to validate the header and certificate further, since it has already been validated.
 
-                    if let Some(r) = self.target.get(&header.author) {
+                    if let Some(r) = self.targets.get(&header.author) {
                         if header.round <= *r {
                             // Ignore fetch request when we already need to sync to a later certificate.
                             continue;
@@ -124,10 +122,10 @@ impl CertificateWaiter {
                                 // Ignore fetch request. Possibly the certificate was processed while the message is in the queue.
                                 continue;
                             }
-                            // Otherwise, continue to update fetch target.
+                            // Otherwise, continue to update fetch targets.
                         },
                         Ok(None) => {
-                            // The authority has no update since genesis. Continue to update fetch target.
+                            // The authority has no update since genesis. Continue to update fetch targets.
                         },
                         Err(e) => {
                             warn!("Failed to read latest round for {}: {}", header.author, e);
@@ -136,37 +134,30 @@ impl CertificateWaiter {
                         },
                     };
 
-                    // Update the target round for the authority.
-                    *self.target.entry(header.author.clone()).or_default() = header.round;
+                    // Update the target rounds for the authority.
+                    *self.targets.entry(header.author.clone()).or_default() = header.round;
 
-                    // Ok to ignore kick when tx_kick_from_cert channel already has a message.
-                    let _ = self.tx_kick_from_cert.try_send(());
-                },
-                Some(_) = self.rx_kick_from_cert.recv() => {
-                    // Only proceeds to fetch certificates if there is no running fetch task.
-                    if let Some(handle) = &self.fetch_certificates_task {
-                        if !handle.is_finished() {
-                            continue;
-                        }
+                    // Kick start a fetch task if there is no task other than the pending task running.
+                    if self.fetch_certificates_task.len() == 1 {
+                        self.kick();
                     }
+                },
+                _ = self.fetch_certificates_task.next() => {
+                    // Kick start another fetch task after the previous one terminates.
+                    // If all targets have been fetched, the new task will clean up the targets and exit.
                     self.kick();
                 },
-                Some(_) = self.rx_kick_from_fetch.recv() => {
-                    // The fetch task can still be running here, after sending the kick message but before finishing.
-                    // But a new kick is always started regardless.
-                    self.kick();
-                }
                 result = self.rx_reconfigure.changed() => {
                     result.expect("Committee channel dropped");
                     let message = self.rx_reconfigure.borrow_and_update().clone();
                     match message {
                         ReconfigureNotification::NewEpoch(committee) => {
                             self.committee = committee;
-                            self.target.clear();
+                            self.targets.clear();
                         },
                         ReconfigureNotification::UpdateCommittee(committee) => {
                             self.committee = committee;
-                            // There should be no committee membership change so self.target does not need to be updated.
+                            // There should be no committee membership change so self.targets does not need to be updated.
                         },
                         ReconfigureNotification::Shutdown => return
                     }
@@ -188,12 +179,12 @@ impl CertificateWaiter {
                 return;
             }
         };
-        self.target.retain(|origin, target_round| {
+        self.targets.retain(|origin, target_round| {
             let current_round = progression.get(origin).unwrap();
             // Drop sync target when cert store already has an equal or higher round for the origin.
             current_round < target_round
         });
-        if self.target.is_empty() {
+        if self.targets.is_empty() {
             trace!("Certificates have caught up. Skip fetching.");
             return;
         }
@@ -201,40 +192,39 @@ impl CertificateWaiter {
         let handle = self.create_fetch_task(progression);
         let epoch = self.committee.epoch();
         let metrics = self.metrics.clone();
-        let tx_kick_from_fetch = self.tx_kick_from_fetch.clone();
 
-        self.fetch_certificates_task = Some(tokio::task::spawn(async move {
-            metrics
-                .certificate_waiter_inflight_fetch
-                .with_label_values(&[&epoch.to_string()])
-                .set(1);
-            metrics
-                .certificate_waiter_fetch_attempts
-                .with_label_values(&[&epoch.to_string()])
-                .inc();
+        self.fetch_certificates_task.push(
+            tokio::task::spawn(async move {
+                metrics
+                    .certificate_waiter_inflight_fetch
+                    .with_label_values(&[&epoch.to_string()])
+                    .set(1);
+                metrics
+                    .certificate_waiter_fetch_attempts
+                    .with_label_values(&[&epoch.to_string()])
+                    .inc();
 
-            let now = Instant::now();
-            match handle.await {
-                Ok(_) => {
-                    debug!("Finished task to fetch certificates successfully");
-                }
-                Err(e) => {
-                    debug!("Finished task to fetch certificates with error: {e}");
-                }
-            };
+                let now = Instant::now();
+                match handle.await {
+                    Ok(_) => {
+                        debug!("Finished task to fetch certificates successfully");
+                    }
+                    Err(e) => {
+                        debug!("Finished task to fetch certificates with error: {e}");
+                    }
+                };
 
-            metrics
-                .certificate_waiter_op_latency
-                .with_label_values(&[&epoch.to_string()])
-                .observe(now.elapsed().as_secs_f64());
-            metrics
-                .certificate_waiter_inflight_fetch
-                .with_label_values(&[&epoch.to_string()])
-                .set(0);
-
-            // Schedule another fetch task to check progression and fetch again if needed.
-            let _ = tx_kick_from_fetch.send(()).await;
-        }));
+                metrics
+                    .certificate_waiter_op_latency
+                    .with_label_values(&[&epoch.to_string()])
+                    .observe(now.elapsed().as_secs_f64());
+                metrics
+                    .certificate_waiter_inflight_fetch
+                    .with_label_values(&[&epoch.to_string()])
+                    .set(0);
+            })
+            .boxed(),
+        );
 
         debug!("Started task to fetch certificates");
     }
@@ -247,7 +237,6 @@ impl CertificateWaiter {
         let name = self.name.clone();
         let network = self.network.clone();
         let committee = self.committee.clone();
-        let certificate_store = self.certificate_store.clone();
         let tx_certificates_loopback = self.tx_certificates_loopback.clone();
         let metrics = self.metrics.clone();
 
@@ -264,16 +253,15 @@ impl CertificateWaiter {
                 request.clone(),
             )
             .await;
+            let num_certs_fetched = response.certificates.len();
 
             // Process and store fetched certificates.
-            store_certificates_helper(
-                response,
-                committee,
-                &certificate_store,
-                tx_certificates_loopback,
-                metrics,
-            )
-            .await?;
+            store_certificates_helper(response, tx_certificates_loopback).await?;
+
+            metrics
+                .certificate_waiter_num_certificates_processed
+                .with_label_values(&[&committee.epoch().to_string()])
+                .add(num_certs_fetched as i64);
 
             Ok(())
         })
@@ -336,48 +324,35 @@ async fn fetch_certificates_helper(
 #[instrument(level = "debug", skip_all)]
 async fn store_certificates_helper(
     response: FetchCertificatesResponse,
-    committee: Committee,
-    certificate_store: &CertificateStore,
-    tx_certificates_loopback: Sender<Certificate>,
-    metrics: Arc<PrimaryMetrics>,
+    tx_certificates_loopback: Sender<CertificateLoopbackMessage>,
 ) -> DagResult<()> {
     trace!("Start sending fetched certificates to processing");
-    let mut waiters = Vec::new();
-    for certificate in response.certificates {
-        if waiters.len() == MAX_CERTIFICATES_TO_FETCH {
-            break;
-        }
-        waiters.push(certificate_store.notify_read(certificate.digest()));
-        // NOTE: currently this relies on core to verify and sanitize the certificate,
-        // and making sure all parents exist in storage. In future we may want to move the verification here.
-        if tx_certificates_loopback.send(certificate).await.is_err() {
-            warn!("Failed to send fetched certificate to processing");
-            return Err(DagError::ClosedChannel(
-                "tx_certificates_loopback".to_string(),
-            ));
-        }
+    if response.certificates.len() > MAX_CERTIFICATES_TO_FETCH {
+        return Err(DagError::TooManyFetchedCertificatesReturned(
+            response.certificates.len(),
+            MAX_CERTIFICATES_TO_FETCH,
+        ));
     }
-
-    // TODO: wait on a signal from core instead, without timeout.
-    let waiters_len = waiters.len();
-    let mut timeout = Box::pin(time::sleep(Duration::from_secs(30)));
-    let epoch = committee.epoch();
-    tokio::select! {
-        result = try_join_all(waiters) => {
-            if let Err(e) = result {
-                warn!("Failed to wait for certificates written to store: {e}");
-                return Err(DagError::from(e));
-            }
-            metrics.certificate_waiter_num_certificates_processed
-            .with_label_values(&[&epoch.to_string()]).add(waiters_len as i64);
-            trace!("Done writing {} fetched certificates", waiters_len);
-        },
-        _ = &mut timeout => {
-            metrics.certificate_waiter_processing_timed_out
-            .with_label_values(&[&epoch.to_string()]).inc();
-            warn!("Processing fetched certificates timed out");
-        }
-    };
+    let (tx_done, rx_done) = oneshot::channel();
+    if let Err(e) = tx_certificates_loopback
+        .send(CertificateLoopbackMessage {
+            certificates: response.certificates,
+            done: tx_done,
+        })
+        .await
+    {
+        return Err(DagError::ClosedChannel(format!(
+            "Failed to send fetched certificate to processing. tx_certificates_loopback error: {}",
+            e
+        )));
+    }
+    if let Err(e) = rx_done.await {
+        return Err(DagError::ClosedChannel(format!(
+            "Failed to wait for core to process loopback certificates: {}",
+            e
+        )));
+    }
+    trace!("Fetched certificates have finished processing");
 
     Ok(())
 }

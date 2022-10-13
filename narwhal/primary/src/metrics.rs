@@ -391,8 +391,6 @@ pub struct PrimaryMetrics {
     pub certificate_waiter_fetch_attempts: IntGaugeVec,
     /// Number of fetched certificates successfully processed by core.
     pub certificate_waiter_num_certificates_processed: IntGaugeVec,
-    /// Number of times where processing of fetched certificates timed out.
-    pub certificate_waiter_processing_timed_out: IntGaugeVec,
     /// Latency per iteration of fetching and processing certificates.
     pub certificate_waiter_op_latency: HistogramVec,
     /// Number of votes that were requested but not sent due to previously having voted differently
@@ -540,13 +538,6 @@ impl PrimaryMetrics {
             certificate_waiter_num_certificates_processed: register_int_gauge_vec_with_registry!(
                 "certificate_waiter_num_certificates_processed",
                 "Number of fetched certificates successfully processed by core.",
-                &["epoch"],
-                registry
-            )
-            .unwrap(),
-            certificate_waiter_processing_timed_out: register_int_gauge_vec_with_registry!(
-                "certificate_waiter_processing_timed_out",
-                " Number of times where processing of fetched certificates timed out..",
                 &["epoch"],
                 registry
             )
