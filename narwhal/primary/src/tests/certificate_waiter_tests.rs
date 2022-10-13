@@ -253,8 +253,11 @@ async fn fetch_certificates_basic() {
 
     // Verify the fetch request.
     let mut req = rx_fetch_req.recv().await.unwrap();
-    assert_eq!(req.progression.len(), fixture.authorities().count());
-    for (_, round) in &req.progression {
+    assert_eq!(
+        req.exclusive_lower_bounds.len(),
+        fixture.authorities().count()
+    );
+    for (_, round) in &req.exclusive_lower_bounds {
         assert_eq!(round, &1);
     }
 
@@ -283,7 +286,7 @@ async fn fetch_certificates_basic() {
     loop {
         match rx_fetch_req.try_recv() {
             Ok(r) => {
-                if r.progression[0].1 == 1 {
+                if r.exclusive_lower_bounds[0].1 == 1 {
                     // Drain the fetch requests sent out before the last reply.
                     continue;
                 }
@@ -293,9 +296,12 @@ async fn fetch_certificates_basic() {
             Err(e) => panic!("Unexpected error! {}", e),
         }
     }
-    assert_eq!(req.progression.len(), fixture.authorities().count());
+    assert_eq!(
+        req.exclusive_lower_bounds.len(),
+        fixture.authorities().count()
+    );
     let mut rounds = req
-        .progression
+        .exclusive_lower_bounds
         .iter()
         .map(|(_, round)| round)
         .cloned()
@@ -330,7 +336,7 @@ async fn fetch_certificates_basic() {
     loop {
         match rx_fetch_req.try_recv() {
             Ok(r) => {
-                if r.progression[0].1 == 16 || r.progression[0].1 == 17 {
+                if r.exclusive_lower_bounds[0].1 == 16 || r.exclusive_lower_bounds[0].1 == 17 {
                     // Drain the fetch requests sent out before the last reply.
                     continue;
                 }

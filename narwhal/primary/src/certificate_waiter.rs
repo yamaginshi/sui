@@ -6,7 +6,7 @@ use config::Committee;
 use crypto::{NetworkPublicKey, PublicKey};
 use futures::{stream::FuturesUnordered, Future, FutureExt, StreamExt};
 use network::PrimaryToPrimaryRpc;
-use rand::{rngs::ThreadRng, seq::SliceRandom, Rng};
+use rand::{rngs::ThreadRng, seq::SliceRandom};
 use std::{collections::BTreeMap, future::pending, pin::Pin, sync::Arc, time::Duration};
 use storage::CertificateStore;
 use tokio::{
@@ -14,7 +14,7 @@ use tokio::{
     task::{JoinError, JoinHandle},
     time::{self, Instant},
 };
-use tracing::{debug, instrument, trace, warn};
+use tracing::{debug, error, instrument, trace, warn};
 use types::{
     error::{DagError, DagResult},
     metered_channel::{Receiver, Sender},
@@ -123,15 +123,16 @@ impl CertificateWaiter {
                                 continue;
                             }
                             // Otherwise, continue to update fetch targets.
-                        },
+                        }
                         Ok(None) => {
-                            // The authority has no update since genesis. Continue to update fetch targets.
-                        },
+                            // No certificate has been processed for the authority since genesis.
+                            // Continue to update fetch target for the authority.
+                        }
                         Err(e) => {
-                            warn!("Failed to read latest round for {}: {}", header.author, e);
-                            // Storage error.
+                            // If this happens, it is most likely due to bincode serialization error.
+                            error!("Failed to read latest round for {}: {}", header.author, e);
                             continue;
-                        },
+                        }
                     };
 
                     // Update the target rounds for the authority.
@@ -145,7 +146,9 @@ impl CertificateWaiter {
                 _ = self.fetch_certificates_task.next() => {
                     // Kick start another fetch task after the previous one terminates.
                     // If all targets have been fetched, the new task will clean up the targets and exit.
-                    self.kick();
+                    if self.fetch_certificates_task.len() == 1 {
+                        self.kick();
+                    }
                 },
                 result = self.rx_reconfigure.changed() => {
                     result.expect("Committee channel dropped");
@@ -169,27 +172,27 @@ impl CertificateWaiter {
 
     // Starts a task to fetch missing certificates from other primaries.
     // A call to kick() can be triggered by a certificate with missing parents or the end of a fetch task.
-    // Each iterations of kick() updates the target rounds, and iterations will continue until there is no more target rounds to catch up to.
+    // Each iteration of kick() updates the target rounds, and iterations will continue until there are no more target rounds to catch up to.
     #[allow(clippy::mutable_key_type)]
     fn kick(&mut self) {
-        let progression = match self.read_round_progression() {
-            Ok(progression) => progression,
+        let highest_rounds = match self.read_highest_rounds() {
+            Ok(highest_rounds) => highest_rounds,
             Err(e) => {
                 warn!("Failed to read rounds per authority from the certificate store: {e}");
                 return;
             }
         };
         self.targets.retain(|origin, target_round| {
-            let current_round = progression.get(origin).unwrap();
+            let highest_round = highest_rounds.get(origin).unwrap();
             // Drop sync target when cert store already has an equal or higher round for the origin.
-            current_round < target_round
+            highest_round < target_round
         });
         if self.targets.is_empty() {
             trace!("Certificates have caught up. Skip fetching.");
             return;
         }
 
-        let handle = self.create_fetch_task(progression);
+        let handle = self.create_fetch_task(highest_rounds);
         let epoch = self.committee.epoch();
         let metrics = self.metrics.clone();
 
@@ -198,7 +201,7 @@ impl CertificateWaiter {
                 metrics
                     .certificate_waiter_inflight_fetch
                     .with_label_values(&[&epoch.to_string()])
-                    .set(1);
+                    .inc();
                 metrics
                     .certificate_waiter_fetch_attempts
                     .with_label_values(&[&epoch.to_string()])
@@ -221,7 +224,7 @@ impl CertificateWaiter {
                 metrics
                     .certificate_waiter_inflight_fetch
                     .with_label_values(&[&epoch.to_string()])
-                    .set(0);
+                    .dec();
             })
             .boxed(),
         );
@@ -232,7 +235,7 @@ impl CertificateWaiter {
     #[allow(clippy::mutable_key_type)]
     fn create_fetch_task(
         &mut self,
-        progression: BTreeMap<PublicKey, Round>,
+        highest_rounds: BTreeMap<PublicKey, Round>,
     ) -> JoinHandle<DagResult<()>> {
         let name = self.name.clone();
         let network = self.network.clone();
@@ -243,7 +246,7 @@ impl CertificateWaiter {
         tokio::task::spawn(async move {
             // Send request to fetch certificates.
             let request = FetchCertificatesRequest {
-                progression: progression.into_iter().collect(),
+                exclusive_lower_bounds: highest_rounds.into_iter().collect(),
                 max_items: MAX_CERTIFICATES_TO_FETCH,
             };
             let response = fetch_certificates_helper(
@@ -253,11 +256,10 @@ impl CertificateWaiter {
                 request.clone(),
             )
             .await;
-            let num_certs_fetched = response.certificates.len();
 
             // Process and store fetched certificates.
-            store_certificates_helper(response, tx_certificates_loopback).await?;
-
+            let num_certs_fetched = response.certificates.len();
+            process_certificates_helper(response, tx_certificates_loopback).await?;
             metrics
                 .certificate_waiter_num_certificates_processed
                 .with_label_values(&[&committee.epoch().to_string()])
@@ -268,14 +270,14 @@ impl CertificateWaiter {
     }
 
     #[allow(clippy::mutable_key_type)]
-    fn read_round_progression(&self) -> DagResult<BTreeMap<PublicKey, Round>> {
-        let mut progression = BTreeMap::new();
+    fn read_highest_rounds(&self) -> DagResult<BTreeMap<PublicKey, Round>> {
+        let mut highest_rounds = BTreeMap::new();
         for (name, _) in self.committee.authorities() {
             // Last round is 0 (genesis) when authority is not found in store.
             let last_round = self.certificate_store.last_round_number(name)?.unwrap_or(0);
-            progression.insert(name.clone(), last_round);
+            highest_rounds.insert(name.clone(), last_round);
         }
-        Ok(progression)
+        Ok(highest_rounds)
     }
 }
 
@@ -300,9 +302,7 @@ async fn fetch_certificates_helper(
         let mut fut = FuturesUnordered::new();
         for peer in peers.iter() {
             fut.push(network.fetch_certificates(peer, request.clone()));
-            let mut interval = Box::pin(time::sleep(
-                request_interval + Duration::from_millis(ThreadRng::default().gen_range(0..1000)),
-            ));
+            let mut interval = Box::pin(time::sleep(request_interval));
             tokio::select! {
                 res = fut.next() => match res {
                     Some(Ok(resp)) => {
@@ -310,6 +310,7 @@ async fn fetch_certificates_helper(
                     }
                     Some(Err(e)) => {
                         debug!("Failed to fetch certificates: {e}");
+                        // Issue request to another primary immediately.
                     }
                     None => {}
                 },
@@ -322,7 +323,7 @@ async fn fetch_certificates_helper(
 }
 
 #[instrument(level = "debug", skip_all)]
-async fn store_certificates_helper(
+async fn process_certificates_helper(
     response: FetchCertificatesResponse,
     tx_certificates_loopback: Sender<CertificateLoopbackMessage>,
 ) -> DagResult<()> {

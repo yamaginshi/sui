@@ -682,12 +682,15 @@ pub enum PrimaryMessage {
     },
 }
 
-/// Used by the primary to request certificates from other primaries.
+/// Used by the primary to fetch certificates from other primaries.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FetchCertificatesRequest {
-    /// The authorities to fetch new certificates for, and the highest round of each authority.
-    /// Usually contains all authorities.
-    pub progression: Vec<(PublicKey, Round)>,
+    /// The exclusive round number lower bounds to fetch certificates for each authority.
+    /// This corresponds to the highest round processed by each authority at the requestor.
+    ///
+    /// Currently requestor always includes all authorities in this this vector, but a subset should work too.
+    /// Authorities not in this vector do not get their certificates fetched.
+    pub exclusive_lower_bounds: Vec<(PublicKey, Round)>,
     /// Maximum number of certificates that should be returned.
     pub max_items: usize,
 }

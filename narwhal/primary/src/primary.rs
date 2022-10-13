@@ -595,7 +595,7 @@ impl PrimaryToPrimary for PrimaryReceiverHandler {
         let mut response = FetchCertificatesResponse {
             certificates: Vec::new(),
         };
-        if request.progression.is_empty() || request.max_items == 0 {
+        if request.exclusive_lower_bounds.is_empty() || request.max_items == 0 {
             return Ok(anemo::Response::new(response));
         }
 
@@ -606,7 +606,10 @@ impl PrimaryToPrimary for PrimaryReceiverHandler {
         // Compared to fetching certificates iteratatively round by round, using a heap is simpler,
         // and avoids the pathological case of iterating through many missing rounds of a downed authority.
         let mut fetch_queue = BinaryHeap::new();
-        for (authority, round) in request.progression.into_iter() {
+
+        // Initialize the min-heap for each authority the next higher round from the requested
+        // lower bound.
+        for (authority, round) in request.exclusive_lower_bounds.into_iter() {
             let next_round = self
                 .certificate_store
                 .next_round_number(&authority, round)
@@ -616,6 +619,9 @@ impl PrimaryToPrimary for PrimaryReceiverHandler {
             }
         }
 
+        // Iteratively pop one of the (Round, Authority) pairs with the smallest round,
+        // and push to min-heap the next higher round of the same authority.
+        // The process ends when there are no more pairs in the min-heap.
         while let Some(Reverse((round, authority))) = fetch_queue.pop() {
             match self
                 .certificate_store
@@ -637,6 +643,7 @@ impl PrimaryToPrimary for PrimaryReceiverHandler {
             if response.certificates.len() == request.max_items {
                 break;
             }
+            assert!(response.certificates.len() < request.max_items);
         }
 
         Ok(anemo::Response::new(response))

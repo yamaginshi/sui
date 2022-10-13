@@ -24,7 +24,7 @@ pub struct CertificateStore {
     /// Holds the certificates by their digest id
     certificates_by_id: DBMap<CertificateDigest, Certificate>,
     /// A secondary index that keeps the certificate digest ids
-    /// by the certificate rounds. Certificate origin are used to produce unique keys.
+    /// by the certificate rounds. Certificate origin is used to produce unique keys.
     /// This helps us to perform range requests based on rounds. We avoid storing again the
     /// certificate here to not waste space. To dereference we use the certificates_by_id storage.
     certificate_id_by_round: DBMap<(Round, PublicKey), CertificateDigest>,
@@ -142,14 +142,10 @@ impl CertificateStore {
         origin: PublicKey,
         round: Round,
     ) -> StoreResult<Option<Certificate>> {
-        let digest = self.certificate_id_by_origin.get(&(origin, round))?;
-        let digest = match digest {
-            Some(d) => d,
-            None => {
-                return Ok(None);
-            }
-        };
-        self.certificates_by_id.get(&digest)
+        match self.certificate_id_by_origin.get(&(origin, round))? {
+            Some(d) => self.certificates_by_id.get(&d),
+            None => Ok(None),
+        }
     }
 
     /// Retrieves multiple certificates by their provided ids. The results
@@ -328,8 +324,8 @@ impl CertificateStore {
         Ok(None)
     }
 
-    /// Retrieves the round number next to the given round for the origin.
-    /// Returns None if there is no more certificate after the specified round.
+    /// Retrieves the next round number bigger than the given round for the origin.
+    /// Returns None if there is no more local certificate from the origin with bigger round.
     pub fn next_round_number(
         &self,
         origin: &PublicKey,

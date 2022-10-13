@@ -260,15 +260,10 @@ async fn test_fetch_certificates_handler() {
         certificate_store: certificate_store.clone(),
     };
 
-    // Generate headers and certificates in successive rounds
-    let genesis_certs: Vec<_> = Certificate::genesis(&committee);
-    for cert in genesis_certs.iter() {
-        certificate_store
-            .write(cert.clone())
-            .expect("Writing certificate to store failed");
-    }
-
-    let mut current_round: Vec<_> = genesis_certs.into_iter().map(|cert| cert.header).collect();
+    let mut current_round: Vec<_> = Certificate::genesis(&committee)
+        .into_iter()
+        .map(|cert| cert.header)
+        .collect();
     let mut headers = vec![];
     let total_rounds = 4;
     for i in 0..total_rounds {
@@ -291,10 +286,10 @@ async fn test_fetch_certificates_handler() {
     assert_eq!(16, total_certificates);
 
     // Populate certificate store such that each authority has the following rounds:
-    // Authority 0: 0 1
-    // Authority 1: 0 1 2
-    // Authority 2: 0 1 2 3
-    // Authority 3: 0 1 2 3 4
+    // Authority 0: 1
+    // Authority 1: 1 2
+    // Authority 2: 1 2 3
+    // Authority 3: 1 2 3 4
     // This is unrealistic because in practice a certificate can only be stored with 2f+1 parents
     // already in store. But this does not matter for testing here.
     let mut authorities = Vec::<PublicKey>::new();
@@ -309,20 +304,23 @@ async fn test_fetch_certificates_handler() {
         }
     }
 
-    // Each test case contains (rounds progression, max items, expected output).
+    // Each test case contains (rounds exclusive_lower_bounds, max items, expected output).
     let test_cases = vec![
+        (vec![0u64, 0, 0, 0], 20, vec![1, 1, 1, 1, 2, 2, 2, 3, 3, 4]),
+        (vec![1u64, 1, 0, 0], 20, vec![1, 1, 2, 2, 2, 3, 3, 4]),
+        (vec![0u64, 0, 1, 1], 20, vec![1, 1, 2, 2, 2, 3, 3, 4]),
         (vec![1u64, 1, 2, 2], 4, vec![2, 3, 3, 4]),
         (vec![1u64, 1, 3, 3], 2, vec![2, 4]),
         (vec![1u64, 1, 2, 2], 2, vec![2, 3]),
         (vec![2u64, 2, 2, 2], 3, vec![3, 3, 4]),
         (vec![2u64, 2, 2, 2], 2, vec![3, 3]),
     ];
-    for (rounds_progression, max_items, expected_rounds) in test_cases {
+    for (rounds_exclusive_lower_bounds, max_items, expected_rounds) in test_cases {
         let req = FetchCertificatesRequest {
-            progression: authorities
+            exclusive_lower_bounds: authorities
                 .clone()
                 .into_iter()
-                .zip(rounds_progression)
+                .zip(rounds_exclusive_lower_bounds)
                 .collect_vec(),
             max_items,
         };
