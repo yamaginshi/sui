@@ -22,6 +22,7 @@ use test_utils::messages::make_transactions_with_wallet_context;
 
 use sui_sdk::SuiClient;
 use sui_types::gas_coin::GasCoin;
+use sui_types::intent::Intent;
 use sui_types::{
     base_types::SuiAddress,
     messages::{Transaction, TransactionData},
@@ -35,7 +36,6 @@ use test_case::{
 use tokio::time::{self, Duration};
 use tracing::{error, info};
 use wallet_client::WalletClient;
-
 pub mod cluster;
 pub mod config;
 pub mod faucet;
@@ -134,7 +134,7 @@ impl TestContext {
             .get_fullnode_client()
             .quorum_driver()
             .execute_transaction(
-                Transaction::new(txn_data, signature),
+                Transaction::new(txn_data, Intent::default(), signature),
                 Some(ExecuteTransactionRequestType::WaitForLocalExecution),
             )
             .await

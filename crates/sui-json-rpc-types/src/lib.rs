@@ -2353,7 +2353,7 @@ impl TryInto<EventFilter> for SuiEventFilter {
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionBytes {
-    /// transaction data bytes, as base-64 encoded string
+    /// intent message bytes, as base-64 encoded string
     pub tx_bytes: Base64,
     /// the gas object to be used
     pub gas: SuiObjectRef,

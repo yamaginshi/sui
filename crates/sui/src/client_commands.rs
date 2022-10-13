@@ -29,7 +29,6 @@ use sui_json_rpc_types::{SuiCertifiedTransaction, SuiExecutionStatus, SuiTransac
 use sui_sdk::crypto::AccountKeystore;
 use sui_sdk::TransactionExecutionResult;
 use sui_sdk::{ClientType, SuiClient};
-use sui_types::crypto::SignatureScheme;
 use sui_types::sui_serde::{Base64, Encoding};
 use sui_types::{
     base_types::{ObjectID, SuiAddress},
@@ -38,6 +37,7 @@ use sui_types::{
     object::Owner,
     parse_sui_type_tag, SUI_FRAMEWORK_ADDRESS,
 };
+use sui_types::{crypto::SignatureScheme, intent::Intent};
 
 use crate::config::{Config, PersistedConfig, SuiClientConfig};
 
@@ -324,9 +324,13 @@ impl SuiClientCommands {
                     .transaction_builder()
                     .publish(sender, compiled_modules, gas, gas_budget)
                     .await?;
-                let signature = context.config.keystore.sign(&sender, &data.to_bytes())?;
+                let signature =
+                    context
+                        .config
+                        .keystore
+                        .sign_secure(&sender, &data, Intent::default())?;
                 let response = context
-                    .execute_transaction(Transaction::new(data, signature))
+                    .execute_transaction(Transaction::new(data, Intent::default(), signature))
                     .await?;
 
                 SuiClientCommandResult::Publish(response)
@@ -367,9 +371,13 @@ impl SuiClientCommands {
                     .transaction_builder()
                     .transfer_object(from, object_id, gas, gas_budget, to)
                     .await?;
-                let signature = context.config.keystore.sign(&from, &data.to_bytes())?;
+                let signature =
+                    context
+                        .config
+                        .keystore
+                        .sign_secure(&from, &data, Intent::default())?;
                 let response = context
-                    .execute_transaction(Transaction::new(data, signature))
+                    .execute_transaction(Transaction::new(data, Intent::default(), signature))
                     .await?;
                 let cert = response.certificate;
                 let effects = response.effects;
@@ -394,9 +402,13 @@ impl SuiClientCommands {
                     .transaction_builder()
                     .transfer_sui(from, object_id, gas_budget, to, amount)
                     .await?;
-                let signature = context.config.keystore.sign(&from, &data.to_bytes())?;
+                let signature =
+                    context
+                        .config
+                        .keystore
+                        .sign_secure(&from, &data, Intent::default())?;
                 let response = context
-                    .execute_transaction(Transaction::new(data, signature))
+                    .execute_transaction(Transaction::new(data, Intent::default(), signature))
                     .await?;
                 let cert = response.certificate;
                 let effects = response.effects;
@@ -436,9 +448,13 @@ impl SuiClientCommands {
                     .transaction_builder()
                     .pay(from, input_coins, recipients, amounts, gas, gas_budget)
                     .await?;
-                let signature = context.config.keystore.sign(&from, &data.to_bytes())?;
+                let signature =
+                    context
+                        .config
+                        .keystore
+                        .sign_secure(&from, &data, Intent::default())?;
                 let response = context
-                    .execute_transaction(Transaction::new(data, signature))
+                    .execute_transaction(Transaction::new(data, Intent::default(), signature))
                     .await?;
                 let cert = response.certificate;
                 let effects = response.effects;
@@ -533,9 +549,13 @@ impl SuiClientCommands {
                         return Err(anyhow!("Exactly one of `count` and `amounts` must be present for split-coin command."));
                     }
                 };
-                let signature = context.config.keystore.sign(&signer, &data.to_bytes())?;
+                let signature =
+                    context
+                        .config
+                        .keystore
+                        .sign_secure(&signer, &data, Intent::default())?;
                 let response = context
-                    .execute_transaction(Transaction::new(data, signature))
+                    .execute_transaction(Transaction::new(data, Intent::default(), signature))
                     .await?;
                 SuiClientCommandResult::SplitCoin(response)
             }
@@ -551,9 +571,13 @@ impl SuiClientCommands {
                     .transaction_builder()
                     .merge_coins(signer, primary_coin, coin_to_merge, gas, gas_budget)
                     .await?;
-                let signature = context.config.keystore.sign(&signer, &data.to_bytes())?;
+                let signature =
+                    context
+                        .config
+                        .keystore
+                        .sign_secure(&signer, &data, Intent::default())?;
                 let response = context
-                    .execute_transaction(Transaction::new(data, signature))
+                    .execute_transaction(Transaction::new(data, Intent::default(), signature))
                     .await?;
 
                 SuiClientCommandResult::MergeCoin(response)
@@ -956,8 +980,11 @@ pub async fn call_move(
             gas_budget,
         )
         .await?;
-    let signature = context.config.keystore.sign(&sender, &data.to_bytes())?;
-    let transaction = Transaction::new(data, signature);
+    let signature = context
+        .config
+        .keystore
+        .sign_secure(&sender, &data, Intent::default())?;
+    let transaction = Transaction::new(data, Intent::default(), signature);
 
     let response = context.execute_transaction(transaction).await?;
     let cert = response.certificate;

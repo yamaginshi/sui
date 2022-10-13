@@ -6,13 +6,11 @@ use move_package::BuildConfig;
 use serde_json::json;
 use std::{collections::HashSet, path::Path};
 
-use signature::Signer;
 use typed_store::Map;
 
 use sui_framework::build_move_package_to_bytes;
-use sui_types::crypto::{AccountKeyPair, Signature};
+use sui_types::crypto::AccountKeyPair;
 use sui_types::gas_coin::GasCoin;
-use sui_types::messages::Transaction;
 use sui_types::object::{Object, GAS_VALUE_FOR_TESTING};
 use sui_types::{crypto::get_key_pair, object::Owner};
 
@@ -21,6 +19,7 @@ use crate::authority_aggregator::authority_aggregator_tests::{
 };
 use crate::authority_client::LocalAuthorityClient;
 use crate::gateway_state::{GatewayAPI, GatewayState};
+use crate::test_utils::to_sender_signed_transaction;
 
 use super::*;
 
@@ -70,9 +69,8 @@ async fn public_transfer_object(
         )
         .await?;
 
-    let signature = key.sign(&data.to_bytes());
     let result = gateway
-        .execute_transaction(Transaction::new(data, signature))
+        .execute_transaction(to_sender_signed_transaction(data, key))
         .await?;
     Ok(result)
 }
@@ -153,9 +151,8 @@ async fn test_publish() {
         .await
         .unwrap();
 
-    let signature = key1.sign(&data.to_bytes());
     gateway
-        .execute_transaction(Transaction::new(data, signature))
+        .execute_transaction(to_sender_signed_transaction(data, &key1))
         .await
         .unwrap();
 }
@@ -184,9 +181,8 @@ async fn test_coin_split() {
         .await
         .unwrap();
 
-    let signature = key1.sign(&data.to_bytes());
     let response = gateway
-        .execute_transaction(Transaction::new(data, signature))
+        .execute_transaction(to_sender_signed_transaction(data, &key1))
         .await
         .unwrap()
         .parsed_data
@@ -238,9 +234,8 @@ async fn test_coin_split_insufficient_gas() {
         .await
         .unwrap();
 
-    let signature = key1.sign(&data.to_bytes());
     let response = gateway
-        .execute_transaction(Transaction::new(data, signature))
+        .execute_transaction(to_sender_signed_transaction(data, &key1))
         .await;
     // Tx should fail due to out of gas, and no transactions should remain pending.
     // Objects are not locked either.
@@ -281,9 +276,8 @@ async fn test_coin_merge() {
         .await
         .unwrap();
 
-    let signature = key1.sign(&data.to_bytes());
     let response = gateway
-        .execute_transaction(Transaction::new(data, signature))
+        .execute_transaction(to_sender_signed_transaction(data, &key1))
         .await
         .unwrap()
         .parsed_data
@@ -323,14 +317,10 @@ async fn test_equivocation_resilient() {
             coin_object.compute_object_reference(),
             1000,
         );
-        let signature: Signature = key1.sign(&data.to_bytes());
+        let tx = to_sender_signed_transaction(data, &key1);
         let handle = tokio::task::spawn({
             let gateway_copy = gateway.clone();
-            async move {
-                gateway_copy
-                    .execute_transaction(Transaction::new(data, signature))
-                    .await
-            }
+            async move { gateway_copy.execute_transaction(tx).await }
         });
         handles.push(handle);
     }
@@ -481,9 +471,8 @@ async fn test_get_owner_object() {
         .await
         .unwrap();
 
-    let signature = key1.sign(&data.to_bytes());
     let response = gateway
-        .execute_transaction(Transaction::new(data, signature))
+        .execute_transaction(to_sender_signed_transaction(data, &key1))
         .await
         .unwrap()
         .parsed_data
@@ -506,9 +495,9 @@ async fn test_get_owner_object() {
         )
         .await
         .unwrap();
-    let signature = key1.sign(&data.to_bytes());
+
     let response = gateway
-        .execute_transaction(Transaction::new(data, signature))
+        .execute_transaction(to_sender_signed_transaction(data, &key1))
         .await
         .unwrap();
     let parent = &response.effects.created.first().unwrap().reference;
@@ -525,9 +514,8 @@ async fn test_get_owner_object() {
         )
         .await
         .unwrap();
-    let signature = key1.sign(&data.to_bytes());
     let response = gateway
-        .execute_transaction(Transaction::new(data, signature))
+        .execute_transaction(to_sender_signed_transaction(data, &key1))
         .await
         .unwrap();
     let child = &response.effects.created.first().unwrap().reference;
@@ -549,9 +537,8 @@ async fn test_get_owner_object() {
         )
         .await
         .unwrap();
-    let signature = key1.sign(&data.to_bytes());
     gateway
-        .execute_transaction(Transaction::new(data, signature))
+        .execute_transaction(to_sender_signed_transaction(data, &key1))
         .await
         .unwrap();
 
@@ -666,9 +653,8 @@ async fn test_batch_transaction() {
         .batch_transaction(addr1, params, None, 5000)
         .await
         .unwrap();
-    let signature = key1.sign(&data.to_bytes());
     let effects = gateway
-        .execute_transaction(Transaction::new(data, signature))
+        .execute_transaction(to_sender_signed_transaction(data, &key1))
         .await
         .unwrap()
         .effects;

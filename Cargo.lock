@@ -8377,6 +8377,7 @@ name = "sui-open-rpc"
 version = "0.6.1"
 dependencies = [
  "anyhow",
+ "bcs",
  "clap 3.2.17",
  "hyper",
  "move-core-types",

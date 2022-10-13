@@ -26,6 +26,7 @@ use sui_types::base_types::ObjectRef;
 use sui_types::base_types::{ObjectID, SuiAddress, TransactionDigest};
 use sui_types::batch::UpdateItem;
 use sui_types::error::SuiResult;
+use sui_types::intent::Intent;
 use sui_types::messages::ExecuteTransactionRequestType;
 use sui_types::messages::{
     BatchInfoRequest, BatchInfoResponseItem, CallArg, ObjectArg, ObjectInfoRequest,
@@ -103,9 +104,9 @@ pub async fn publish_basics_package(context: &WalletContext, sender: SuiAddress)
         let signature = context
             .config
             .keystore
-            .sign(&sender, &data.to_bytes())
+            .sign_secure(&sender, &data, Intent::default())
             .unwrap();
-        Transaction::new(data, signature)
+        Transaction::new(data, Intent::default(), signature)
     };
 
     let resp = context
@@ -160,9 +161,9 @@ pub async fn submit_move_transaction(
     let signature = context
         .config
         .keystore
-        .sign(&sender, &data.to_bytes())
+        .sign_secure(&sender, &data, Intent::default())
         .unwrap();
-    let tx = Transaction::new(data, signature);
+    let tx = Transaction::new(data, Intent::default(), signature);
     let tx_digest = tx.digest();
     debug!(?tx_digest, "submitting move transaction");
 
@@ -364,9 +365,9 @@ pub async fn delete_devnet_nft(
     let signature = context
         .config
         .keystore
-        .sign(sender, &data.to_bytes())
+        .sign_secure(sender, &data, Intent::default())
         .unwrap();
-    let tx = Transaction::new(data, signature);
+    let tx = Transaction::new(data, Intent::default(), signature);
 
     let resp = context
         .client

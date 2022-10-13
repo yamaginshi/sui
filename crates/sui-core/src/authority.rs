@@ -561,6 +561,7 @@ impl AuthorityState {
         let _metrics_guard = start_timer(self.metrics.handle_transaction_latency.clone());
 
         self.metrics.tx_orders.inc();
+        // TODO: Check transaction's intent chain_id matches authority's.
         // Check the sender's signature.
         transaction.verify().map_err(|e| {
             self.metrics.signature_errors.inc();
