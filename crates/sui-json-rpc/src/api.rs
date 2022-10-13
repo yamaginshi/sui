@@ -20,7 +20,7 @@ use sui_types::base_types::{ObjectID, SequenceNumber, SuiAddress, TransactionDig
 use sui_types::batch::TxSequenceNumber;
 use sui_types::committee::EpochId;
 use sui_types::crypto::SignatureScheme;
-use sui_types::event::EventSequenceNumber;
+use sui_types::event::EventID;
 use sui_types::messages::CommitteeInfoResponse;
 use sui_types::messages::ExecuteTransactionRequestType;
 use sui_types::query::{EventQuery, Ordering, TransactionQuery};
@@ -398,12 +398,13 @@ pub trait EventReadApi {
     #[method(name = "getEvents")]
     async fn get_events(
         &self,
+        /// the event query criteria.
         query: EventQuery,
-        /// Optional paging cursor
-        cursor: Option<EventSequenceNumber>,
-        /// Maximum item returned per page
+        /// optional paging cursor
+        cursor: Option<EventID>,
+        /// maximum number of items per page
         limit: Option<usize>,
-        /// Transaction query ordering
+        /// transaction query ordering
         order: Ordering,
     ) -> RpcResult<EventPage>;
 }

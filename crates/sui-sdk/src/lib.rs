@@ -38,7 +38,7 @@ use sui_json_rpc_types::{
 use sui_transaction_builder::{DataReader, TransactionBuilder};
 pub use sui_types as types;
 use sui_types::base_types::{ObjectID, SuiAddress, TransactionDigest};
-use sui_types::event::EventSequenceNumber;
+use sui_types::event::EventID;
 use sui_types::messages::Transaction;
 use sui_types::query::{EventQuery, Ordering, TransactionQuery};
 use types::base_types::SequenceNumber;
@@ -356,7 +356,7 @@ impl EventApi {
     pub async fn get_events(
         &self,
         query: EventQuery,
-        cursor: Option<EventSequenceNumber>,
+        cursor: Option<EventID>,
         limit: Option<usize>,
         order: Ordering,
     ) -> anyhow::Result<EventPage> {

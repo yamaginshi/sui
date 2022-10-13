@@ -8,6 +8,7 @@ import {
   isGetOwnedObjectsResponse,
   isGetTxnDigestsResponse,
   isGetTxnDigestsResponse__DEPRECATED,
+  isPaginatedEvents,
   isPaginatedTransactionDigests,
   isSuiEvents,
   isSuiExecuteTransactionResponse,
@@ -48,7 +49,7 @@ import {
   SuiTransactionResponse,
   TransactionDigest,
   TransactionQuery,
-  SUI_TYPE_ARG,
+  SUI_TYPE_ARG, EventQuery, EventId, PaginatedEvents,
 } from '../types';
 import { SignatureScheme } from '../cryptography/publickey';
 import {
@@ -576,21 +577,22 @@ export class JsonRpcProvider extends Provider {
   }
 
   // Events
-
-  async getEventsByTransaction(
-    digest: TransactionDigest,
-    count: number = EVENT_QUERY_MAX_LIMIT
-  ): Promise<SuiEvents> {
+  async getEvents(
+      query: EventQuery,
+      cursor: EventId| null,
+      limit: number|null,
+      order: Ordering
+  ): Promise<PaginatedEvents> {
     try {
       return await this.client.requestWithType(
-        'sui_getEventsByTransaction',
-        [digest, count],
-        isSuiEvents,
-        this.skipDataValidation
+          'sui_getEvents',
+          [query, cursor, limit, order],
+          isPaginatedEvents,
+          this.skipDataValidation
       );
     } catch (err) {
       throw new Error(
-        `Error getting events by transaction: ${digest}, with error: ${err}`
+          `Error getting events for query: ${err} for query ${query}`
       );
     }
   }

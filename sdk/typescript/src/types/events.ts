@@ -3,7 +3,7 @@
 
 import { SuiAddress, ObjectOwner, TransactionDigest } from './common';
 import { ObjectId, SequenceNumber } from './objects';
-import { SuiJsonValue } from './transactions';
+import {Owner, SuiJsonValue} from './transactions';
 
 // event types mirror those in "sui-json-rpc-types/lib.rs"
 export type MoveEvent = {
@@ -60,6 +60,24 @@ export type MoveEventField = {
   value: SuiJsonValue;
 };
 
+export type EventQuery =
+    | "All"
+    | { "Transaction": TransactionDigest }
+    | { "MoveModule": { package: ObjectId, module: string } }
+    | { "MoveEvent": string }
+    | { "EventType": EventType }
+    | { "Sender": SuiAddress }
+    | { "Recipient": Owner }
+    | { "Object": ObjectId }
+    | { "TimeRange": { "start_time": number, "end_time": number } };
+
+export type EventId = number
+
+export type PaginatedEvents = {
+  data: SuiEvents;
+  nextCursor: EventId | null;
+};
+
 export type EventType =
   | 'MoveEvent'
   | 'Publish'
@@ -83,6 +101,7 @@ export type SuiEventFilter =
   | { Or: [SuiEventFilter, SuiEventFilter] };
 
 export type SuiEventEnvelope = {
+  id: EventId;
   timestamp: number;
   txDigest: TransactionDigest;
   event: SuiEvent;

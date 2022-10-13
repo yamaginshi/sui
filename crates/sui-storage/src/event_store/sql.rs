@@ -432,7 +432,7 @@ impl EventStore for SqlEventStore {
     #[instrument(level = "debug", skip_all, err)]
     async fn all_events(
         &self,
-        cursor: EventSequenceNumber,
+        cursor: EventID,
         limit: usize,
         reverse: bool,
     ) -> Result<Vec<StoredEvent>, SuiError> {
@@ -455,7 +455,7 @@ impl EventStore for SqlEventStore {
     #[instrument(level = "debug", skip_all, err)]
     async fn events_by_transaction(
         &self,
-        cursor: EventSequenceNumber,
+        cursor: EventID,
         digest: TransactionDigest,
         limit: usize,
         reverse: bool,
@@ -476,7 +476,7 @@ impl EventStore for SqlEventStore {
     #[instrument(level = "debug", skip_all, err)]
     async fn events_by_type(
         &self,
-        cursor: EventSequenceNumber,
+        cursor: EventID,
         event_type: EventType,
         limit: usize,
         reverse: bool,
@@ -501,7 +501,7 @@ impl EventStore for SqlEventStore {
     #[instrument(level = "debug", skip_all, err)]
     async fn event_iterator(
         &self,
-        cursor: EventSequenceNumber,
+        cursor: EventID,
         start_time: u64,
         end_time: u64,
         limit: usize,
@@ -523,7 +523,7 @@ impl EventStore for SqlEventStore {
     #[instrument(level = "debug", skip_all, err)]
     async fn events_by_module_id(
         &self,
-        cursor: EventSequenceNumber,
+        cursor: EventID,
         module: &ModuleId,
         limit: usize,
         reverse: bool,
@@ -549,7 +549,7 @@ impl EventStore for SqlEventStore {
     #[instrument(level = "debug", skip_all, err)]
     async fn events_by_move_event_struct_name(
         &self,
-        cursor: EventSequenceNumber,
+        cursor: EventID,
         move_event_struct_name: &str,
         limit: usize,
         reverse: bool,
@@ -575,7 +575,7 @@ impl EventStore for SqlEventStore {
     #[instrument(level = "debug", skip_all, err)]
     async fn events_by_sender(
         &self,
-        cursor: EventSequenceNumber,
+        cursor: EventID,
         sender: &SuiAddress,
         limit: usize,
         reverse: bool,
@@ -601,7 +601,7 @@ impl EventStore for SqlEventStore {
     #[instrument(level = "debug", skip_all, err)]
     async fn events_by_recipient(
         &self,
-        cursor: EventSequenceNumber,
+        cursor: EventID,
         recipient: &Owner,
         limit: usize,
         reverse: bool,
@@ -630,7 +630,7 @@ impl EventStore for SqlEventStore {
     #[instrument(level = "debug", skip_all, err)]
     async fn events_by_object(
         &self,
-        cursor: EventSequenceNumber,
+        cursor: EventID,
         object: &ObjectID,
         limit: usize,
         reverse: bool,

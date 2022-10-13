@@ -388,6 +388,7 @@
       "params": [
         {
           "name": "query",
+          "description": "the event query criteria.",
           "required": true,
           "schema": {
             "$ref": "#/components/schemas/EventQuery"
@@ -395,7 +396,7 @@
         },
         {
           "name": "cursor",
-          "description": "Optional paging cursor",
+          "description": "optional paging cursor",
           "schema": {
             "type": "integer",
             "format": "uint64",
@@ -404,7 +405,7 @@
         },
         {
           "name": "limit",
-          "description": "Maximum item returned per page",
+          "description": "maximum number of items per page",
           "schema": {
             "type": "integer",
             "format": "uint",
@@ -413,7 +414,7 @@
         },
         {
           "name": "order",
-          "description": "Transaction query ordering",
+          "description": "transaction query ordering",
           "required": true,
           "schema": {
             "$ref": "#/components/schemas/Ordering"
@@ -426,7 +427,59 @@
         "schema": {
           "$ref": "#/components/schemas/Page_for_EventEnvelope_and_uint64"
         }
-      }
+      },
+      "examples": [
+        {
+          "name": "Return the Events emitted by a transaction",
+          "params": [
+            {
+              "name": "query",
+              "value": {
+                "Transaction": "gA8fELgirLI/JDKVpMfsOtvDRO4FvjFTQhnc2CGIHXw="
+              }
+            },
+            {
+              "name": "cursor",
+              "value": 10
+            },
+            {
+              "name": "limit",
+              "value": 1
+            },
+            {
+              "name": "order",
+              "value": "Ascending"
+            }
+          ],
+          "result": {
+            "name": "Result",
+            "value": {
+              "data": [
+                {
+                  "id": 10,
+                  "timestamp": 0,
+                  "txDigest": "gA8fELgirLI/JDKVpMfsOtvDRO4FvjFTQhnc2CGIHXw=",
+                  "event": {
+                    "transferObject": {
+                      "packageId": "0x0000000000000000000000000000000000000002",
+                      "transactionModule": "native",
+                      "sender": "0xd084dad8fc6cc86a71b0df0c98c5b71c4184d9b2",
+                      "recipient": {
+                        "AddressOwner": "0xdee7c7ff955697fe2b704c9540a3846e9298b75d"
+                      },
+                      "objectId": "0xb725c1ee3027b783ea689e1a38eb476c6efc44ed",
+                      "version": 2,
+                      "type": "ToAddress",
+                      "amount": 100
+                    }
+                  }
+                }
+              ],
+              "nextCursor": 11
+            }
+          }
+        }
+      ]
     },
     {
       "name": "sui_getMoveFunctionArgTypes",
@@ -2219,7 +2272,7 @@
         "type": "object",
         "required": [
           "event",
-          "seqNum",
+          "id",
           "timestamp"
         ],
         "properties": {
@@ -2231,7 +2284,8 @@
               }
             ]
           },
-          "seqNum": {
+          "id": {
+            "description": "Unique ID of a Sui Event, the ID is generated during transaction post processing, the ID is local to this particular fullnode and will be different from other fullnode.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0.0

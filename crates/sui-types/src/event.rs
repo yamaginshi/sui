@@ -32,7 +32,7 @@ use crate::{
 /// A universal Sui event type encapsulating different types of events
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventEnvelope {
-    pub seq_num: EventSequenceNumber,
+    pub seq_num: EventID,
     /// UTC timestamp in milliseconds since epoch (1/1/1970)
     pub timestamp: u64,
     /// Transaction digest of associated transaction, if any
@@ -44,7 +44,9 @@ pub struct EventEnvelope {
     /// json value for MoveStruct (for MoveEvent only)
     pub move_struct_json_value: Option<Value>,
 }
-pub type EventSequenceNumber = u64;
+/// Unique ID of a Sui Event, the ID is generated during transaction post processing,
+/// the ID is local to this particular fullnode and will be different from other fullnode.
+pub type EventID = u64;
 
 impl EventEnvelope {
     pub fn new(

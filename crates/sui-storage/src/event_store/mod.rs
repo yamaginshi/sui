@@ -30,7 +30,7 @@ use sui_json_rpc_types::{SuiEvent, SuiEventEnvelope};
 use sui_types::base_types::{ObjectID, SequenceNumber, SuiAddress, TransactionDigest};
 use sui_types::error::SuiError;
 use sui_types::error::SuiError::{StorageCorruptedFieldError, StorageMissingFieldError};
-use sui_types::event::{Event, EventSequenceNumber, TransferType};
+use sui_types::event::{Event, EventID, TransferType};
 use sui_types::event::{EventEnvelope, EventType};
 use sui_types::object::Owner;
 
@@ -293,7 +293,7 @@ impl TryInto<SuiEventEnvelope> for StoredEvent {
             Err(e) => anyhow::bail!("Invalid EventType {event_type_str}: {e:?}"),
         }?;
         Ok(SuiEventEnvelope {
-            seq_num,
+            id: seq_num,
             timestamp,
             tx_digest,
             event,
@@ -330,7 +330,7 @@ pub trait EventStore {
 
     async fn all_events(
         &self,
-        cursor: EventSequenceNumber,
+        cursor: EventID,
         limit: usize,
         reverse: bool,
     ) -> Result<Vec<StoredEvent>, SuiError>;
@@ -338,7 +338,7 @@ pub trait EventStore {
     /// transaction, sorted in order emitted.
     async fn events_by_transaction(
         &self,
-        cursor: EventSequenceNumber,
+        cursor: EventID,
         digest: TransactionDigest,
         limit: usize,
         reverse: bool,
@@ -349,7 +349,7 @@ pub trait EventStore {
     /// sorted in in ascending time.
     async fn events_by_type(
         &self,
-        cursor: EventSequenceNumber,
+        cursor: EventID,
         event_type: EventType,
         limit: usize,
         reverse: bool,
@@ -359,7 +359,7 @@ pub trait EventStore {
     /// [start_time, end_time), sorted in ascending time.
     async fn events_by_module_id(
         &self,
-        cursor: EventSequenceNumber,
+        cursor: EventID,
         module: &ModuleId,
         limit: usize,
         reverse: bool,
@@ -370,7 +370,7 @@ pub trait EventStore {
     /// during [start_time, end_time), sorted in ascending time.
     async fn events_by_move_event_struct_name(
         &self,
-        cursor: EventSequenceNumber,
+        cursor: EventID,
         move_event_struct_name: &str,
         limit: usize,
         reverse: bool,
@@ -380,7 +380,7 @@ pub trait EventStore {
     /// emitted during [start_time, end_time), sorted in ascending time.
     async fn events_by_sender(
         &self,
-        cursor: EventSequenceNumber,
+        cursor: EventID,
         sender: &SuiAddress,
         limit: usize,
         reverse: bool,
@@ -390,7 +390,7 @@ pub trait EventStore {
     /// emitted during [start_time, end_time), sorted in ascending time.
     async fn events_by_recipient(
         &self,
-        cursor: EventSequenceNumber,
+        cursor: EventID,
         recipient: &Owner,
         limit: usize,
         reverse: bool,
@@ -400,7 +400,7 @@ pub trait EventStore {
     /// emitted during [start_time, end_time), sorted in ascending time.
     async fn events_by_object(
         &self,
-        cursor: EventSequenceNumber,
+        cursor: EventID,
         object: &ObjectID,
         limit: usize,
         reverse: bool,
@@ -410,7 +410,7 @@ pub trait EventStore {
     /// [start_time, end_time), sorted in ascending time.
     async fn event_iterator(
         &self,
-        cursor: EventSequenceNumber,
+        cursor: EventID,
         start_time: u64,
         end_time: u64,
         limit: usize,

@@ -24,7 +24,13 @@ import {
   ObjectOwner,
   SuiAddress,
   ObjectId,
-  SuiEvents, TransactionQuery, Ordering, PaginatedTransactionDigests,
+  SuiEvents,
+  TransactionQuery,
+  Ordering,
+  PaginatedTransactionDigests,
+  EventQuery,
+  PaginatedEvents,
+  EventId,
 } from '../types';
 import { Provider } from './provider';
 
@@ -231,11 +237,21 @@ export class VoidProvider extends Provider {
     return new Error(`Please use a valid provider for ${operation}`);
   }
 
-  async getTransactions(_query: TransactionQuery,
-                        _cursor: TransactionDigest | null,
-                        _limit: number | null,
-                        _order: Ordering
+  async getTransactions(
+      _query: TransactionQuery,
+      _cursor: TransactionDigest | null,
+      _limit: number | null,
+      _order: Ordering
   ): Promise<PaginatedTransactionDigests> {
     throw this.newError('getTransactions');
+  }
+
+  async getEvents(
+      _query: EventQuery,
+      _cursor: EventId | null,
+      _limit: number | null,
+      _order: Ordering
+  ): Promise<PaginatedEvents> {
+    throw this.newError('getEvents');
   }
 }

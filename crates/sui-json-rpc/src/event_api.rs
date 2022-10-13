@@ -14,7 +14,7 @@ use sui_core::authority::AuthorityState;
 use sui_core::event_handler::EventHandler;
 use sui_json_rpc_types::{EventPage, SuiEvent, SuiEventEnvelope, SuiEventFilter};
 use sui_open_rpc::Module;
-use sui_types::event::{EventEnvelope, EventSequenceNumber};
+use sui_types::event::{EventEnvelope, EventID};
 use sui_types::query::{EventQuery, Ordering};
 
 use crate::api::EventReadApiServer;
@@ -57,7 +57,7 @@ impl EventStreamingApiServer for EventStreamingApiImpl {
         let stream = stream.map(move |e: EventEnvelope| {
             let event = SuiEvent::try_from(e.event, state.module_cache.as_ref());
             event.map(|event| SuiEventEnvelope {
-                seq_num: e.seq_num,
+                id: e.seq_num,
                 timestamp: e.timestamp,
                 tx_digest: e.tx_digest,
                 event,
@@ -99,7 +99,7 @@ impl EventReadApiServer for EventReadApiImpl {
     async fn get_events(
         &self,
         query: EventQuery,
-        cursor: Option<EventSequenceNumber>,
+        cursor: Option<EventID>,
         limit: Option<usize>,
         order: Ordering,
     ) -> RpcResult<EventPage> {
@@ -110,7 +110,7 @@ impl EventReadApiServer for EventReadApiImpl {
             .state
             .get_events(query, cursor, limit + 1, reverse)
             .await?;
-        let next_cursor = data.get(limit).map(|event| event.seq_num);
+        let next_cursor = data.get(limit).map(|event| event.id);
         data.truncate(limit);
         Ok(EventPage { data, next_cursor })
     }

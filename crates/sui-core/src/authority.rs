@@ -65,7 +65,7 @@ use sui_storage::{
 };
 use sui_types::committee::EpochId;
 use sui_types::crypto::{AuthorityKeyPair, NetworkKeyPair};
-use sui_types::event::{Event, EventSequenceNumber};
+use sui_types::event::{Event, EventID};
 use sui_types::messages_checkpoint::{
     AuthenticatedCheckpoint, CertifiedCheckpointSummary, CheckpointRequest, CheckpointRequestType,
     CheckpointResponse, CheckpointSequenceNumber,
@@ -1898,7 +1898,7 @@ impl AuthorityState {
     pub async fn get_events(
         &self,
         query: EventQuery,
-        cursor: Option<EventSequenceNumber>,
+        cursor: Option<EventID>,
         limit: usize,
         reverse: bool,
     ) -> Result<Vec<SuiEventEnvelope>, anyhow::Error> {
