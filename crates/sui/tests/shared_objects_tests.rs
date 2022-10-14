@@ -353,7 +353,7 @@ async fn shared_object_on_gateway() {
     let committee_store = handles[0].with(|h| h.state().committee_store().clone());
     let clients = test_authority_aggregator(&configs, committee_store);
     let path = tempfile::tempdir().unwrap().into_path();
-    let gateway_store = Arc::new(GatewayStore::open(&path.join("store"), None));
+    let gateway_store = Arc::new(GatewayStore::open(&path.join("store"), None).unwrap());
     let gateway = Arc::new(
         GatewayState::new_with_authorities(gateway_store, clients, GatewayMetrics::new_for_tests())
             .unwrap(),
