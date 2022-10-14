@@ -401,8 +401,6 @@ impl Primary {
             payload_store.clone(),
             rx_consensus_round_updates.clone(),
             parameters.gc_depth,
-            parameters.sync_retry_delay,
-            parameters.sync_retry_nodes,
             tx_reconfigure.subscribe(),
             /* rx_synchronizer */ rx_sync_headers,
             /* tx_core */ tx_headers_loopback,

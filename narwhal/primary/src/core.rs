@@ -58,7 +58,7 @@ pub struct Core {
     /// Receiver for dag messages (headers, votes, certificates).
     rx_primaries: Receiver<PrimaryMessage>,
     /// Receives loopback headers from the `HeaderWaiter`.
-    rx_header_waiter: Receiver<Header>,
+    rx_headers_loopback: Receiver<Header>,
     /// Receives loopback certificates from the `CertificateWaiter`.
     rx_certificates_loopback: Receiver<CertificateLoopbackMessage>,
     /// Receives our newly created headers from the `Proposer`.
@@ -108,7 +108,7 @@ impl Core {
         gc_depth: Round,
         rx_committee: watch::Receiver<ReconfigureNotification>,
         rx_primaries: Receiver<PrimaryMessage>,
-        rx_header_waiter: Receiver<Header>,
+        rx_headers_loopback: Receiver<Header>,
         rx_certificates_loopback: Receiver<CertificateLoopbackMessage>,
         rx_proposer: Receiver<Header>,
         tx_consensus: Sender<Certificate>,
@@ -129,7 +129,7 @@ impl Core {
                 gc_depth,
                 rx_reconfigure: rx_committee,
                 rx_primaries,
-                rx_header_waiter,
+                rx_headers_loopback,
                 rx_certificates_loopback,
                 rx_proposer,
                 tx_consensus,
@@ -560,9 +560,17 @@ impl Core {
                 received: header.epoch
             }
         );
+        // Even if a certificate can be created from this header, it will never get included
+        // in this node's DAG.
         ensure!(
             self.gc_round < header.round,
             DagError::TooOld(header.id.into(), header.round, self.gc_round)
+        );
+        // The header round is too high for this node, which is unlikely to acquire all
+        // parent certificates in time.
+        ensure!(
+            self.gc_round + 2 * self.gc_depth > header.round,
+            DagError::TooNew(header.id.into(), header.round, self.gc_round)
         );
 
         // Verify the header's signature.
@@ -693,7 +701,7 @@ impl Core {
 
                 // We receive here loopback headers from the `HeaderWaiter`. Those are headers for which we interrupted
                 // execution (we were missing some of their dependencies) and we are now ready to resume processing.
-                Some(header) = self.rx_header_waiter.recv() => self.process_header(&header).await,
+                Some(header) = self.rx_headers_loopback.recv() => self.process_header(&header).await,
 
                 // We receive here loopback certificates from the `CertificateWaiter`. Those are certificates for which
                 // we interrupted execution (we were missing some of their ancestors) and we are now ready to resume

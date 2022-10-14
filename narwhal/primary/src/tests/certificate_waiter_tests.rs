@@ -212,8 +212,6 @@ async fn fetch_certificates_basic() {
         payload_store.clone(),
         rx_consensus_round_updates.clone(),
         gc_depth,
-        /* sync_retry_delay */ Duration::from_secs(5),
-        /* sync_retry_nodes */ 3,
         rx_reconfigure.clone(),
         rx_header_waiter,
         tx_headers_loopback,

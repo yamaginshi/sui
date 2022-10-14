@@ -70,6 +70,9 @@ pub enum DagError {
     #[error("Message {0} (round {1}) too old for GC round {2}")]
     TooOld(Digest, Round, Round),
 
+    #[error("Message {0} (round {1}) is too new for this primary at round {2}")]
+    TooNew(Digest, Round, Round),
+
     #[error("Vote {0} (round {1}) too old for round {2}")]
     VoteTooOld(Digest, Round, Round),
 
