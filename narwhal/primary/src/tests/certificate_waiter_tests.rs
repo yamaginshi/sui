@@ -49,6 +49,8 @@ impl PrimaryToPrimaryRpc for FetchCertificateProxy {
     }
 }
 
+// Simulate consensus committing all certificates written to store, by updating last committed
+// rounds to the last written rounds.
 #[allow(clippy::mutable_key_type)]
 fn write_last_committed(
     committee: &Committee,
@@ -78,7 +80,7 @@ async fn verify_certificates_in_store(
 ) {
     let mut missing = None;
     for _ in 0..20 {
-        sleep(Duration::from_secs(1)).await;
+        missing = None;
         for (i, _) in certificates.iter().enumerate() {
             if let Ok(Some(_)) = certificate_store.read(certificates[i].digest()) {
                 continue;
@@ -86,6 +88,10 @@ async fn verify_certificates_in_store(
             missing = Some(i);
             break;
         }
+        if missing.is_none() {
+            break;
+        }
+        sleep(Duration::from_secs(1)).await;
     }
     if let Some(i) = missing {
         panic!(
@@ -108,7 +114,7 @@ fn verify_certificates_not_in_store(
         .is_none());
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn fetch_certificates_basic() {
     let fixture = CommitteeFixture::builder().randomize_ports(true).build();
     let committee = fixture.committee();
@@ -201,6 +207,8 @@ async fn fetch_certificates_basic() {
         proxy,
         certificate_store.clone(),
         Some(consensus_store.clone()),
+        rx_consensus_round_updates.clone(),
+        gc_depth,
         rx_reconfigure.clone(),
         rx_certificate_waiter,
         tx_certificates_loopback,

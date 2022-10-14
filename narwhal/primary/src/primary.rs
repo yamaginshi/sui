@@ -399,7 +399,7 @@ impl Primary {
             worker_cache.clone(),
             certificate_store.clone(),
             payload_store.clone(),
-            rx_consensus_round_updates,
+            rx_consensus_round_updates.clone(),
             parameters.gc_depth,
             parameters.sync_retry_delay,
             parameters.sync_retry_nodes,
@@ -422,6 +422,8 @@ impl Primary {
             } else {
                 None
             },
+            rx_consensus_round_updates,
+            parameters.gc_depth,
             tx_reconfigure.subscribe(),
             rx_certificate_waiter,
             tx_certificates_loopback,

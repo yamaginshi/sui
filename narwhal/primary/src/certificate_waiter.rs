@@ -50,6 +50,10 @@ pub(crate) struct CertificateWaiter {
     certificate_store: CertificateStore,
     /// Persistent storage for consensus when using internal consensus. Read-only usage.
     consensus_store: Option<Arc<ConsensusStore>>,
+    /// Receiver for signal of round changes. Used for calculating gc_round.
+    rx_consensus_round_updates: watch::Receiver<u64>,
+    /// The depth of the garbage collector.
+    gc_depth: Round,
     /// Watch channel notifying of epoch changes, it is only used for cleanup.
     rx_reconfigure: watch::Receiver<ReconfigureNotification>,
     /// Receives certificates with missing parents from the `Synchronizer`.
@@ -82,6 +86,8 @@ impl CertificateWaiter {
         network: Arc<dyn PrimaryToPrimaryRpc>,
         certificate_store: CertificateStore,
         consensus_store: Option<Arc<ConsensusStore>>,
+        rx_consensus_round_updates: watch::Receiver<u64>,
+        gc_depth: Round,
         rx_reconfigure: watch::Receiver<ReconfigureNotification>,
         rx_certificate_waiter: Receiver<Certificate>,
         tx_certificates_loopback: Sender<CertificateLoopbackMessage>,
@@ -102,6 +108,8 @@ impl CertificateWaiter {
                 committee,
                 certificate_store,
                 consensus_store,
+                rx_consensus_round_updates,
+                gc_depth,
                 rx_reconfigure,
                 rx_certificate_waiter,
                 targets: BTreeMap::new(),
@@ -190,16 +198,21 @@ impl CertificateWaiter {
     // until there are no more target rounds to catch up to.
     #[allow(clippy::mutable_key_type)]
     fn kick(&mut self) {
-        let committed_rounds = match self.all_committed_rounds() {
+        let gc_round = self.gc_round();
+        let committed_rounds: BTreeMap<_, _> = match self.all_committed_rounds() {
             Ok(committed_rounds) => committed_rounds,
             Err(e) => {
                 warn!("Failed to read rounds per authority from the certificate store: {e}");
                 return;
             }
-        };
+        }
+        .into_iter()
+        .map(|(key, r)| (key, r.max(gc_round)))
+        .collect();
         self.targets.retain(|origin, target_round| {
-            let committed_round = committed_rounds.get(origin).unwrap();
+            let committed_round = committed_rounds.get(origin).unwrap_or(&gc_round);
             // Drop sync target when cert store already has an equal or higher round for the origin.
+            // This will apply GC to targets as well.
             committed_round < target_round
         });
         if self.targets.is_empty() {
@@ -231,10 +244,10 @@ impl CertificateWaiter {
                 let now = Instant::now();
                 match run_fetch_task(state.clone(), committee.clone(), committed_rounds).await {
                     Ok(_) => {
-                        debug!("Finished task to fetch certificates successfully");
+                        debug!("Finished task to fetch certificates successfully, elapsed = {}s", now.elapsed().as_secs_f64());
                     }
                     Err(e) => {
-                        debug!("Finished task to fetch certificates with error: {e}");
+                        debug!("Error from task to fetch certificates: {e}");
                     }
                 };
 
@@ -251,6 +264,13 @@ impl CertificateWaiter {
             })
             .boxed(),
         );
+    }
+
+    fn gc_round(&self) -> Round {
+        self.rx_consensus_round_updates
+            .borrow()
+            .to_owned()
+            .saturating_sub(self.gc_depth)
     }
 
     fn last_committed_round(&self, authority: &PublicKey) -> DagResult<Round> {

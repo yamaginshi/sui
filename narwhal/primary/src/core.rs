@@ -612,7 +612,15 @@ impl Core {
                 received: certificate.epoch()
             }
         );
-
+        // Ok to drop old certificate, because it will never be included into the consensus dag.
+        ensure!(
+            self.gc_round < certificate.round(),
+            DagError::TooOld(
+                certificate.digest().into(),
+                certificate.round(),
+                self.gc_round
+            )
+        );
         // Verify the certificate (and the embedded header).
         certificate
             .verify(&self.committee, self.worker_cache.clone())
