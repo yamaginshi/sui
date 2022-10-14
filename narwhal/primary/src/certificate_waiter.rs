@@ -18,8 +18,8 @@ use tracing::{debug, error, instrument, trace, warn};
 use types::{
     error::{DagError, DagResult},
     metered_channel::{Receiver, Sender},
-    Certificate, FetchCertificatesRequest, FetchCertificatesResponse, ReconfigureNotification,
-    Round,
+    Certificate, ConsensusStore, FetchCertificatesRequest, FetchCertificatesResponse,
+    ReconfigureNotification, Round,
 };
 
 #[cfg(test)]
@@ -46,8 +46,10 @@ pub(crate) struct CertificateWaiter {
     state: Arc<CertificateWaiterState>,
     /// The committee information.
     committee: Committee,
-    /// The persistent storage.
+    /// Persistent storage for certificates. Read-only usage.
     certificate_store: CertificateStore,
+    /// Persistent storage for consensus when using internal consensus. Read-only usage.
+    consensus_store: Option<Arc<ConsensusStore>>,
     /// Watch channel notifying of epoch changes, it is only used for cleanup.
     rx_reconfigure: watch::Receiver<ReconfigureNotification>,
     /// Receives certificates with missing parents from the `Synchronizer`.
@@ -79,6 +81,7 @@ impl CertificateWaiter {
         committee: Committee,
         network: Arc<dyn PrimaryToPrimaryRpc>,
         certificate_store: CertificateStore,
+        consensus_store: Option<Arc<ConsensusStore>>,
         rx_reconfigure: watch::Receiver<ReconfigureNotification>,
         rx_certificate_waiter: Receiver<Certificate>,
         tx_certificates_loopback: Sender<CertificateLoopbackMessage>,
@@ -98,6 +101,7 @@ impl CertificateWaiter {
                 state,
                 committee,
                 certificate_store,
+                consensus_store,
                 rx_reconfigure,
                 rx_certificate_waiter,
                 targets: BTreeMap::new(),
@@ -128,18 +132,14 @@ impl CertificateWaiter {
                     }
 
                     // The header should have been verified as part of the certificate.
-                    match self.certificate_store.last_round_number(&header.author) {
-                        Ok(Some(r)) => {
+                    match self.last_committed_round(&header.author) {
+                        Ok(r) => {
                             if r >= header.round {
                                 // Ignore fetch request. Possibly the certificate was processed
                                 // while the message is in the queue.
                                 continue;
                             }
                             // Otherwise, continue to update fetch targets.
-                        }
-                        Ok(None) => {
-                            // No certificate has been processed for the authority since genesis.
-                            // Continue to update fetch target for the authority.
                         }
                         Err(e) => {
                             // If this happens, it is most likely due to bincode serialization error.
@@ -190,17 +190,17 @@ impl CertificateWaiter {
     // until there are no more target rounds to catch up to.
     #[allow(clippy::mutable_key_type)]
     fn kick(&mut self) {
-        let highest_rounds = match self.read_highest_rounds() {
-            Ok(highest_rounds) => highest_rounds,
+        let committed_rounds = match self.all_committed_rounds() {
+            Ok(committed_rounds) => committed_rounds,
             Err(e) => {
                 warn!("Failed to read rounds per authority from the certificate store: {e}");
                 return;
             }
         };
         self.targets.retain(|origin, target_round| {
-            let highest_round = highest_rounds.get(origin).unwrap();
+            let committed_round = committed_rounds.get(origin).unwrap();
             // Drop sync target when cert store already has an equal or higher round for the origin.
-            highest_round < target_round
+            committed_round < target_round
         });
         if self.targets.is_empty() {
             trace!("Certificates have caught up. Skip fetching.");
@@ -210,6 +210,11 @@ impl CertificateWaiter {
         let state = self.state.clone();
         let committee = self.committee.clone();
 
+        debug!(
+            "Starting task to fetch missing certificates: max target {}, committed {:?}",
+            self.targets.values().max().unwrap_or(&0),
+            committed_rounds.values()
+        );
         self.fetch_certificates_task.push(
             tokio::task::spawn(async move {
                 state
@@ -224,7 +229,7 @@ impl CertificateWaiter {
                     .inc();
 
                 let now = Instant::now();
-                match run_fetch_task(state.clone(), committee.clone(), highest_rounds).await {
+                match run_fetch_task(state.clone(), committee.clone(), committed_rounds).await {
                     Ok(_) => {
                         debug!("Finished task to fetch certificates successfully");
                     }
@@ -246,19 +251,30 @@ impl CertificateWaiter {
             })
             .boxed(),
         );
+    }
 
-        debug!("Started task to fetch certificates");
+    fn last_committed_round(&self, authority: &PublicKey) -> DagResult<Round> {
+        match &self.consensus_store {
+            // Last round is 0 (genesis) when authority is not found in store.
+            Some(consensus_store) => Ok(consensus_store
+                .read_last_committed_round(authority)?
+                .unwrap_or(0)),
+            None => Ok(self
+                .certificate_store
+                .last_round_number(authority)?
+                .unwrap_or(0)),
+        }
     }
 
     #[allow(clippy::mutable_key_type)]
-    fn read_highest_rounds(&self) -> DagResult<BTreeMap<PublicKey, Round>> {
-        let mut highest_rounds = BTreeMap::new();
+    fn all_committed_rounds(&self) -> DagResult<BTreeMap<PublicKey, Round>> {
+        let mut all_committed_rounds = BTreeMap::new();
         for (name, _) in self.committee.authorities() {
             // Last round is 0 (genesis) when authority is not found in store.
-            let last_round = self.certificate_store.last_round_number(name)?.unwrap_or(0);
-            highest_rounds.insert(name.clone(), last_round);
+            let last_round = self.last_committed_round(name)?;
+            all_committed_rounds.insert(name.clone(), last_round);
         }
-        Ok(highest_rounds)
+        Ok(all_committed_rounds)
     }
 }
 
@@ -266,11 +282,11 @@ impl CertificateWaiter {
 async fn run_fetch_task(
     state: Arc<CertificateWaiterState>,
     committee: Committee,
-    highest_rounds: BTreeMap<PublicKey, Round>,
+    committed_rounds: BTreeMap<PublicKey, Round>,
 ) -> DagResult<()> {
     // Send request to fetch certificates.
     let request = FetchCertificatesRequest {
-        exclusive_lower_bounds: highest_rounds.into_iter().collect(),
+        exclusive_lower_bounds: committed_rounds.into_iter().collect(),
         max_items: MAX_CERTIFICATES_TO_FETCH,
     };
     let response =
@@ -285,6 +301,7 @@ async fn run_fetch_task(
         .with_label_values(&[&committee.epoch().to_string()])
         .add(num_certs_fetched as i64);
 
+    debug!("Successfully fetched and processed {num_certs_fetched} certificates");
     Ok(())
 }
 

@@ -195,7 +195,7 @@ impl Node {
         let mut handles = Vec::new();
         let (rx_executor_network, tx_executor_network) = oneshot::channel();
         let (dag, network_model) = if !internal_consensus {
-            debug!("Consensus is disabled: the primary will run w/o Tusk");
+            debug!("Consensus is disabled: the primary will run w/o Bullshark");
             let consensus_metrics = Arc::new(ConsensusMetrics::new(registry));
             let (handle, dag) = Dag::new(&committee.load(), rx_new_certificates, consensus_metrics);
 
@@ -250,9 +250,10 @@ impl Node {
             store.proposer_store.clone(),
             store.payload_store.clone(),
             store.vote_digest_store.clone(),
+            store.consensus_store.clone(),
             tx_new_certificates,
-            /* rx_consensus */ rx_consensus,
-            /* dag */ dag,
+            rx_consensus,
+            dag,
             network_model,
             tx_reconfigure,
             tx_consensus,

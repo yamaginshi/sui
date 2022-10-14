@@ -1,23 +1,25 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 use crate::{
-    certificate_waiter::CertificateWaiter,
-    common::{create_db_stores, create_test_vote_store},
-    core::Core,
-    header_waiter::HeaderWaiter,
-    metrics::PrimaryMetrics,
-    synchronizer::Synchronizer,
+    certificate_waiter::CertificateWaiter, common::create_test_vote_store, core::Core,
+    header_waiter::HeaderWaiter, metrics::PrimaryMetrics, synchronizer::Synchronizer,
 };
 use anemo::async_trait;
 use anyhow::Result;
-use crypto::NetworkPublicKey;
+use config::Committee;
+use crypto::{NetworkPublicKey, PublicKey};
 use fastcrypto::{traits::KeyPair, Hash, SignatureService};
 use itertools::Itertools;
 use network::{P2pNetwork, PrimaryToPrimaryRpc};
+use node::NodeStorage;
 use prometheus::Registry;
-use std::{collections::BTreeSet, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeSet, HashMap},
+    sync::Arc,
+    time::Duration,
+};
 use storage::CertificateStore;
-use test_utils::CommitteeFixture;
+use test_utils::{temp_dir, CommitteeFixture};
 use tokio::{
     sync::{
         mpsc::{self, error::TryRecvError, Receiver, Sender},
@@ -26,8 +28,8 @@ use tokio::{
     time::sleep,
 };
 use types::{
-    Certificate, FetchCertificatesRequest, FetchCertificatesResponse, PrimaryMessage,
-    ReconfigureNotification, Round,
+    Certificate, CertificateDigest, ConsensusStore, FetchCertificatesRequest,
+    FetchCertificatesResponse, PrimaryMessage, ReconfigureNotification, Round,
 };
 
 struct FetchCertificateProxy {
@@ -45,6 +47,29 @@ impl PrimaryToPrimaryRpc for FetchCertificateProxy {
         self.request.send(request).await?;
         Ok(self.response.lock().await.recv().await.unwrap())
     }
+}
+
+#[allow(clippy::mutable_key_type)]
+fn write_last_committed(
+    committee: &Committee,
+    certificate_store: &CertificateStore,
+    consensus_sotre: &Arc<ConsensusStore>,
+) {
+    let committed_rounds: HashMap<PublicKey, Round> = committee
+        .authorities()
+        .map(|(name, _)| {
+            (
+                name.clone(),
+                certificate_store
+                    .last_round_number(name)
+                    .unwrap()
+                    .unwrap_or(0),
+            )
+        })
+        .collect();
+    consensus_sotre
+        .write_consensus_state(&committed_rounds, &0, &CertificateDigest::default())
+        .expect("Write to consensus store failed!");
 }
 
 async fn verify_certificates_in_store(
@@ -118,7 +143,10 @@ async fn fetch_certificates_basic() {
     let (tx_fetch_resp, rx_fetch_resp) = mpsc::channel(1000);
 
     // Create test stores.
-    let (header_store, certificate_store, payload_store) = create_db_stores();
+    let store = NodeStorage::reopen(temp_dir());
+    let certificate_store = store.certificate_store.clone();
+    let payload_store = store.payload_store.clone();
+    let consensus_store = store.consensus_store.clone();
 
     // Signal consensus round
     let (_tx_consensus_round_updates, rx_consensus_round_updates) = watch::channel(0u64);
@@ -172,6 +200,7 @@ async fn fetch_certificates_basic() {
         committee.clone(),
         proxy,
         certificate_store.clone(),
+        Some(consensus_store.clone()),
         rx_reconfigure.clone(),
         rx_certificate_waiter,
         tx_certificates_loopback,
@@ -183,7 +212,7 @@ async fn fetch_certificates_basic() {
         name.clone(),
         committee.clone(),
         worker_cache,
-        header_store.clone(),
+        store.header_store.clone(),
         certificate_store.clone(),
         create_test_vote_store(),
         synchronizer,
@@ -241,6 +270,7 @@ async fn fetch_certificates_basic() {
             .expect("Writing certificate to store failed");
     }
     let mut num_written = 4;
+    write_last_committed(&committee, &certificate_store, &consensus_store);
 
     // Send a primary message for a certificate with parents that do not exist locally, to trigger fetching.
     let target_index = 123;
@@ -263,37 +293,38 @@ async fn fetch_certificates_basic() {
 
     // Send back another 62 certificates.
     let first_batch_len = 62;
-    tx_fetch_resp
-        .try_send(FetchCertificatesResponse {
-            certificates: certificates
-                .iter()
-                .skip(num_written)
-                .take(first_batch_len)
-                .cloned()
-                .collect_vec(),
-        })
-        .unwrap();
+    let first_batch_resp = FetchCertificatesResponse {
+        certificates: certificates
+            .iter()
+            .skip(num_written)
+            .take(first_batch_len)
+            .cloned()
+            .collect_vec(),
+    };
+    tx_fetch_resp.try_send(first_batch_resp.clone()).unwrap();
 
-    // The certificates up to index 4 + 62 = 66 should become available in store eventually.
+    // The certificates up to index 4 + 62 = 66 should be written to store eventually by core.
     verify_certificates_in_store(
         &certificate_store,
         &certificates[0..(num_written + first_batch_len)],
     )
     .await;
     num_written += first_batch_len;
+    write_last_committed(&committee, &certificate_store, &consensus_store);
 
     // The certificate waiter should send out another fetch request, because it has not received certificate 123.
     loop {
-        match rx_fetch_req.try_recv() {
-            Ok(r) => {
+        match rx_fetch_req.recv().await {
+            Some(r) => {
                 if r.exclusive_lower_bounds[0].1 == 1 {
                     // Drain the fetch requests sent out before the last reply.
+                    tx_fetch_resp.try_send(first_batch_resp.clone()).unwrap();
                     continue;
                 }
                 req = r;
                 break;
             }
-            Err(e) => panic!("Unexpected error! {}", e),
+            None => panic!("Unexpected channel closing!"),
         }
     }
     assert_eq!(
@@ -312,16 +343,15 @@ async fn fetch_certificates_basic() {
 
     // Send back another 123 + 1 - 66 = 58 certificates.
     let second_batch_len = target_index + 1 - num_written;
-    tx_fetch_resp
-        .try_send(FetchCertificatesResponse {
-            certificates: certificates
-                .iter()
-                .skip(num_written)
-                .take(second_batch_len)
-                .cloned()
-                .collect_vec(),
-        })
-        .unwrap();
+    let second_batch_resp = FetchCertificatesResponse {
+        certificates: certificates
+            .iter()
+            .skip(num_written)
+            .take(second_batch_len)
+            .cloned()
+            .collect_vec(),
+    };
+    tx_fetch_resp.try_send(second_batch_resp.clone()).unwrap();
 
     // The certificates 4 ~ 64 should become available in store eventually.
     verify_certificates_in_store(
@@ -330,6 +360,7 @@ async fn fetch_certificates_basic() {
     )
     .await;
     num_written += second_batch_len;
+    write_last_committed(&committee, &certificate_store, &consensus_store);
 
     // No new fetch request is expected.
     sleep(Duration::from_secs(5)).await;
@@ -338,6 +369,7 @@ async fn fetch_certificates_basic() {
             Ok(r) => {
                 if r.exclusive_lower_bounds[0].1 == 16 || r.exclusive_lower_bounds[0].1 == 17 {
                     // Drain the fetch requests sent out before the last reply.
+                    tx_fetch_resp.try_send(second_batch_resp.clone()).unwrap();
                     continue;
                 }
                 panic!("No more fetch request is expected! {:#?}", r);

@@ -49,8 +49,8 @@ pub use types::PrimaryMessage;
 use types::{
     error::DagError,
     metered_channel::{channel_with_total, Receiver, Sender},
-    BatchDigest, Certificate, FetchCertificatesRequest, FetchCertificatesResponse, Header,
-    HeaderDigest, PrimaryToPrimary, PrimaryToPrimaryServer, ReconfigureNotification,
+    BatchDigest, Certificate, ConsensusStore, FetchCertificatesRequest, FetchCertificatesResponse,
+    Header, HeaderDigest, PrimaryToPrimary, PrimaryToPrimaryServer, ReconfigureNotification,
     RoundVoteDigestPair, WorkerInfoResponse, WorkerPrimaryMessage, WorkerToPrimary,
     WorkerToPrimaryServer,
 };
@@ -90,6 +90,7 @@ impl Primary {
         proposer_store: ProposerStore,
         payload_store: Store<(BatchDigest, WorkerId), PayloadToken>,
         vote_digest_store: Store<PublicKey, RoundVoteDigestPair>,
+        consensus_store: Arc<ConsensusStore>,
         tx_consensus: Sender<Certificate>,
         rx_consensus: Receiver<Certificate>,
         dag: Option<Arc<Dag>>,
@@ -369,7 +370,7 @@ impl Primary {
                 .handler_certificate_deliver_timeout,
         ));
 
-        // Indicator variable for the gRPC server
+        // Indicator variable for components to operate in internal vs external consensus modes.
         let internal_consensus = dag.is_none();
 
         // Responsible for finding missing blocks (certificates) and fetching
@@ -416,6 +417,11 @@ impl Primary {
             (**committee.load()).clone(),
             Arc::new(P2pNetwork::new(network.clone())),
             certificate_store.clone(),
+            if internal_consensus {
+                Some(consensus_store)
+            } else {
+                None
+            },
             tx_reconfigure.subscribe(),
             rx_certificate_waiter,
             tx_certificates_loopback,
