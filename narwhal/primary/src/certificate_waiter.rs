@@ -38,29 +38,36 @@ pub struct CertificateLoopbackMessage {
     pub done: oneshot::Sender<()>,
 }
 
-/// When there are certificates missing from local store, e.g. discovered when a received certificate has missing parents,
-/// CertificateWaiter is responsible for fetching missing certificates from other primaries.
+/// When there are certificates missing from local store, e.g. discovered when a received
+/// certificate has missing parents, CertificateWaiter is responsible for fetching missing
+/// certificates from other primaries.
 pub(crate) struct CertificateWaiter {
-    /// Identity of the current authority.
-    name: PublicKey,
+    /// Internal state of CertificateWaiter.
+    state: Arc<CertificateWaiterState>,
     /// The committee information.
     committee: Committee,
-    /// Network client to fetch certificates from other primaries.
-    network: Arc<dyn PrimaryToPrimaryRpc>,
     /// The persistent storage.
     certificate_store: CertificateStore,
     /// Watch channel notifying of epoch changes, it is only used for cleanup.
     rx_reconfigure: watch::Receiver<ReconfigureNotification>,
     /// Receives certificates with missing parents from the `Synchronizer`.
     rx_certificate_waiter: Receiver<Certificate>,
-    /// Loops fetched certificates back to the core. Certificates are ensured to have all parents.
-    tx_certificates_loopback: Sender<CertificateLoopbackMessage>,
     /// Map of validator to target rounds that local store must catch up to.
     targets: BTreeMap<PublicKey, Round>,
     /// Keeps the handle to the inflight fetch certificates task.
     /// Contains a pending future that never returns, and at most 1 other task.
     fetch_certificates_task:
         FuturesUnordered<Pin<Box<dyn Future<Output = Result<(), JoinError>> + Send>>>,
+}
+
+/// Thread-safe internal state of CertificateWaiter shared with its fetch task.
+struct CertificateWaiterState {
+    /// Identity of the current authority.
+    name: PublicKey,
+    /// Network client to fetch certificates from other primaries.
+    network: Arc<dyn PrimaryToPrimaryRpc>,
+    /// Loops fetched certificates back to the core. Certificates are ensured to have all parents.
+    tx_certificates_loopback: Sender<CertificateLoopbackMessage>,
     /// The metrics handler
     metrics: Arc<PrimaryMetrics>,
 }
@@ -77,21 +84,24 @@ impl CertificateWaiter {
         tx_certificates_loopback: Sender<CertificateLoopbackMessage>,
         metrics: Arc<PrimaryMetrics>,
     ) -> JoinHandle<()> {
+        let state = Arc::new(CertificateWaiterState {
+            name,
+            network,
+            tx_certificates_loopback,
+            metrics,
+        });
         // Add a future that never returns to fetch_certificates_task, so it is blocked when empty.
         let fetch_certificates_task = FuturesUnordered::new();
         fetch_certificates_task.push(pending().boxed());
         tokio::spawn(async move {
             Self {
-                name,
+                state,
                 committee,
-                network,
                 certificate_store,
                 rx_reconfigure,
                 rx_certificate_waiter,
-                tx_certificates_loopback,
                 targets: BTreeMap::new(),
                 fetch_certificates_task,
-                metrics,
             }
             .run()
             .await;
@@ -106,11 +116,13 @@ impl CertificateWaiter {
                     if header.epoch != self.committee.epoch() {
                         continue;
                     }
-                    // Unnecessary to validate the header and certificate further, since it has already been validated.
+                    // Unnecessary to validate the header and certificate further, since it has
+                    // already been validated.
 
                     if let Some(r) = self.targets.get(&header.author) {
                         if header.round <= *r {
-                            // Ignore fetch request when we already need to sync to a later certificate.
+                            // Ignore fetch request when we already need to sync to a later
+                            // certificate.
                             continue;
                         }
                     }
@@ -119,7 +131,8 @@ impl CertificateWaiter {
                     match self.certificate_store.last_round_number(&header.author) {
                         Ok(Some(r)) => {
                             if r >= header.round {
-                                // Ignore fetch request. Possibly the certificate was processed while the message is in the queue.
+                                // Ignore fetch request. Possibly the certificate was processed
+                                // while the message is in the queue.
                                 continue;
                             }
                             // Otherwise, continue to update fetch targets.
@@ -136,7 +149,7 @@ impl CertificateWaiter {
                     };
 
                     // Update the target rounds for the authority.
-                    *self.targets.entry(header.author.clone()).or_default() = header.round;
+                    self.targets.insert(header.author.clone(), header.round);
 
                     // Kick start a fetch task if there is no task other than the pending task running.
                     if self.fetch_certificates_task.len() == 1 {
@@ -160,7 +173,8 @@ impl CertificateWaiter {
                         },
                         ReconfigureNotification::UpdateCommittee(committee) => {
                             self.committee = committee;
-                            // There should be no committee membership change so self.targets does not need to be updated.
+                            // There should be no committee membership change so self.targets does
+                            // not need to be updated.
                         },
                         ReconfigureNotification::Shutdown => return
                     }
@@ -171,8 +185,9 @@ impl CertificateWaiter {
     }
 
     // Starts a task to fetch missing certificates from other primaries.
-    // A call to kick() can be triggered by a certificate with missing parents or the end of a fetch task.
-    // Each iteration of kick() updates the target rounds, and iterations will continue until there are no more target rounds to catch up to.
+    // A call to kick() can be triggered by a certificate with missing parents or the end of a
+    // fetch task. Each iteration of kick() updates the target rounds, and iterations will continue
+    // until there are no more target rounds to catch up to.
     #[allow(clippy::mutable_key_type)]
     fn kick(&mut self) {
         let highest_rounds = match self.read_highest_rounds() {
@@ -192,23 +207,24 @@ impl CertificateWaiter {
             return;
         }
 
-        let handle = self.create_fetch_task(highest_rounds);
-        let epoch = self.committee.epoch();
-        let metrics = self.metrics.clone();
+        let state = self.state.clone();
+        let committee = self.committee.clone();
 
         self.fetch_certificates_task.push(
             tokio::task::spawn(async move {
-                metrics
+                state
+                    .metrics
                     .certificate_waiter_inflight_fetch
-                    .with_label_values(&[&epoch.to_string()])
+                    .with_label_values(&[&committee.epoch.to_string()])
                     .inc();
-                metrics
+                state
+                    .metrics
                     .certificate_waiter_fetch_attempts
-                    .with_label_values(&[&epoch.to_string()])
+                    .with_label_values(&[&committee.epoch.to_string()])
                     .inc();
 
                 let now = Instant::now();
-                match handle.await {
+                match run_fetch_task(state.clone(), committee.clone(), highest_rounds).await {
                     Ok(_) => {
                         debug!("Finished task to fetch certificates successfully");
                     }
@@ -217,56 +233,21 @@ impl CertificateWaiter {
                     }
                 };
 
-                metrics
+                state
+                    .metrics
                     .certificate_waiter_op_latency
-                    .with_label_values(&[&epoch.to_string()])
+                    .with_label_values(&[&committee.epoch.to_string()])
                     .observe(now.elapsed().as_secs_f64());
-                metrics
+                state
+                    .metrics
                     .certificate_waiter_inflight_fetch
-                    .with_label_values(&[&epoch.to_string()])
+                    .with_label_values(&[&committee.epoch.to_string()])
                     .dec();
             })
             .boxed(),
         );
 
         debug!("Started task to fetch certificates");
-    }
-
-    #[allow(clippy::mutable_key_type)]
-    fn create_fetch_task(
-        &mut self,
-        highest_rounds: BTreeMap<PublicKey, Round>,
-    ) -> JoinHandle<DagResult<()>> {
-        let name = self.name.clone();
-        let network = self.network.clone();
-        let committee = self.committee.clone();
-        let tx_certificates_loopback = self.tx_certificates_loopback.clone();
-        let metrics = self.metrics.clone();
-
-        tokio::task::spawn(async move {
-            // Send request to fetch certificates.
-            let request = FetchCertificatesRequest {
-                exclusive_lower_bounds: highest_rounds.into_iter().collect(),
-                max_items: MAX_CERTIFICATES_TO_FETCH,
-            };
-            let response = fetch_certificates_helper(
-                name.clone(),
-                network.clone(),
-                committee.clone(),
-                request.clone(),
-            )
-            .await;
-
-            // Process and store fetched certificates.
-            let num_certs_fetched = response.certificates.len();
-            process_certificates_helper(response, tx_certificates_loopback).await?;
-            metrics
-                .certificate_waiter_num_certificates_processed
-                .with_label_values(&[&committee.epoch().to_string()])
-                .add(num_certs_fetched as i64);
-
-            Ok(())
-        })
     }
 
     #[allow(clippy::mutable_key_type)]
@@ -281,19 +262,45 @@ impl CertificateWaiter {
     }
 }
 
+#[allow(clippy::mutable_key_type)]
+async fn run_fetch_task(
+    state: Arc<CertificateWaiterState>,
+    committee: Committee,
+    highest_rounds: BTreeMap<PublicKey, Round>,
+) -> DagResult<()> {
+    // Send request to fetch certificates.
+    let request = FetchCertificatesRequest {
+        exclusive_lower_bounds: highest_rounds.into_iter().collect(),
+        max_items: MAX_CERTIFICATES_TO_FETCH,
+    };
+    let response =
+        fetch_certificates_helper(&state.name, &state.network, &committee, request).await;
+
+    // Process and store fetched certificates.
+    let num_certs_fetched = response.certificates.len();
+    process_certificates_helper(response, &state.tx_certificates_loopback).await?;
+    state
+        .metrics
+        .certificate_waiter_num_certificates_processed
+        .with_label_values(&[&committee.epoch().to_string()])
+        .add(num_certs_fetched as i64);
+
+    Ok(())
+}
+
 /// Fetches certificates from other primaries concurrently, with ~5 sec interval between each request.
 /// Terminates after the 1st successful response is received.
 #[instrument(level = "debug", skip_all)]
 async fn fetch_certificates_helper(
-    name: PublicKey,
-    network: Arc<dyn PrimaryToPrimaryRpc>,
-    committee: Committee,
+    name: &PublicKey,
+    network: &Arc<dyn PrimaryToPrimaryRpc>,
+    committee: &Committee,
     request: FetchCertificatesRequest,
 ) -> FetchCertificatesResponse {
     trace!("Start sending fetch certificates requests");
     let request_interval = Duration::from_secs(5);
     let mut peers: Vec<NetworkPublicKey> = committee
-        .others_primaries(&name)
+        .others_primaries(name)
         .into_iter()
         .map(|(_, _, network_key)| network_key)
         .collect();
@@ -325,7 +332,7 @@ async fn fetch_certificates_helper(
 #[instrument(level = "debug", skip_all)]
 async fn process_certificates_helper(
     response: FetchCertificatesResponse,
-    tx_certificates_loopback: Sender<CertificateLoopbackMessage>,
+    tx_certificates_loopback: &Sender<CertificateLoopbackMessage>,
 ) -> DagResult<()> {
     trace!("Start sending fetched certificates to processing");
     if response.certificates.len() > MAX_CERTIFICATES_TO_FETCH {
