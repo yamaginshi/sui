@@ -7,10 +7,10 @@ use crate::{
 use anemo::async_trait;
 use anyhow::Result;
 use config::Committee;
-use crypto::{NetworkPublicKey, PublicKey};
+use crypto::PublicKey;
 use fastcrypto::{traits::KeyPair, Hash, SignatureService};
 use itertools::Itertools;
-use network::{P2pNetwork, PrimaryToPrimaryRpc};
+use network::P2pNetwork;
 use node::NodeStorage;
 use prometheus::Registry;
 use std::{
@@ -29,7 +29,8 @@ use tokio::{
 };
 use types::{
     Certificate, CertificateDigest, ConsensusStore, FetchCertificatesRequest,
-    FetchCertificatesResponse, PrimaryMessage, ReconfigureNotification, Round,
+    FetchCertificatesResponse, PrimaryMessage, PrimaryToPrimary, PrimaryToPrimaryServer,
+    ReconfigureNotification, Round,
 };
 
 struct FetchCertificateProxy {
@@ -38,14 +39,28 @@ struct FetchCertificateProxy {
 }
 
 #[async_trait]
-impl PrimaryToPrimaryRpc for FetchCertificateProxy {
+impl PrimaryToPrimary for FetchCertificateProxy {
+    async fn send_message(
+        &self,
+        request: anemo::Request<PrimaryMessage>,
+    ) -> Result<anemo::Response<()>, anemo::rpc::Status> {
+        unimplemented!(
+            "FetchCertificateProxy::send_message() is unimplemented!! {:#?}",
+            request
+        );
+    }
+
     async fn fetch_certificates(
         &self,
-        _: &NetworkPublicKey,
-        request: FetchCertificatesRequest,
-    ) -> Result<FetchCertificatesResponse> {
-        self.request.send(request).await?;
-        Ok(self.response.lock().await.recv().await.unwrap())
+        request: anemo::Request<FetchCertificatesRequest>,
+    ) -> Result<anemo::Response<FetchCertificatesResponse>, anemo::rpc::Status> {
+        self.request
+            .send(request.into_body())
+            .await
+            .map_err(|e| anemo::rpc::Status::from_error(Box::new(e)))?;
+        Ok(anemo::Response::new(
+            self.response.lock().await.recv().await.unwrap(),
+        ))
     }
 }
 
@@ -120,9 +135,9 @@ async fn fetch_certificates_basic() {
     let committee = fixture.committee();
     let worker_cache = fixture.shared_worker_cache();
     let primary = fixture.authorities().next().unwrap();
-    let network_key = primary.network_keypair().copy().private().0.to_bytes();
     let name = primary.public_key();
     let signature_service = SignatureService::new(primary.keypair().copy());
+    let fake_primary = fixture.authorities().nth(1).unwrap();
 
     // kept empty
     let (_tx_reconfigure, rx_reconfigure) =
@@ -168,10 +183,21 @@ async fn fetch_certificates_basic() {
         None,
     );
 
-    let network = anemo::Network::bind("localhost:0")
+    let fake_primary_addr = network::multiaddr_to_address(fake_primary.address()).unwrap();
+    let fake_route =
+        anemo::Router::new().add_rpc_service(PrimaryToPrimaryServer::new(FetchCertificateProxy {
+            request: tx_fetch_req,
+            response: Arc::new(Mutex::new(rx_fetch_resp)),
+        }));
+    let fake_server_network = anemo::Network::bind(fake_primary_addr.clone())
         .server_name("narwhal")
-        .private_key(network_key)
-        .start(anemo::Router::new())
+        .private_key(fake_primary.network_keypair().copy().private().0.to_bytes())
+        .start(fake_route)
+        .unwrap();
+    let client_network = test_utils::test_network(primary.network_keypair(), primary.address());
+    client_network
+        .connect_with_peer_id(fake_primary_addr, fake_server_network.peer_id())
+        .await
         .unwrap();
 
     let metrics = Arc::new(PrimaryMetrics::new(&Registry::new()));
@@ -192,19 +218,14 @@ async fn fetch_certificates_basic() {
         rx_header_waiter,
         tx_headers_loopback,
         metrics.clone(),
-        P2pNetwork::new(network.clone()),
+        P2pNetwork::new(client_network.clone()),
     );
-
-    let proxy = Arc::new(FetchCertificateProxy {
-        request: tx_fetch_req,
-        response: Arc::new(Mutex::new(rx_fetch_resp)),
-    });
 
     // Make a certificate waiter
     let _certificate_waiter_handle = CertificateWaiter::spawn(
         name.clone(),
         committee.clone(),
-        proxy,
+        P2pNetwork::new(client_network.clone()),
         certificate_store.clone(),
         Some(consensus_store.clone()),
         rx_consensus_round_updates.clone(),
@@ -235,7 +256,7 @@ async fn fetch_certificates_basic() {
         tx_consensus,
         /* tx_proposer */ tx_parents,
         metrics.clone(),
-        P2pNetwork::new(network),
+        P2pNetwork::new(client_network),
     );
 
     // Generate headers and certificates in successive rounds

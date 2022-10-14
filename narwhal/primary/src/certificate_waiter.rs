@@ -5,7 +5,7 @@ use crate::metrics::PrimaryMetrics;
 use config::Committee;
 use crypto::{NetworkPublicKey, PublicKey};
 use futures::{stream::FuturesUnordered, Future, FutureExt, StreamExt};
-use network::PrimaryToPrimaryRpc;
+use network::{P2pNetwork, PrimaryToPrimaryRpc};
 use rand::{rngs::ThreadRng, seq::SliceRandom};
 use std::{collections::BTreeMap, future::pending, pin::Pin, sync::Arc, time::Duration};
 use storage::CertificateStore;
@@ -71,7 +71,7 @@ struct CertificateWaiterState {
     /// Identity of the current authority.
     name: PublicKey,
     /// Network client to fetch certificates from other primaries.
-    network: Arc<dyn PrimaryToPrimaryRpc>,
+    network: P2pNetwork,
     /// Loops fetched certificates back to the core. Certificates are ensured to have all parents.
     tx_certificates_loopback: Sender<CertificateLoopbackMessage>,
     /// The metrics handler
@@ -83,7 +83,7 @@ impl CertificateWaiter {
     pub fn spawn(
         name: PublicKey,
         committee: Committee,
-        network: Arc<dyn PrimaryToPrimaryRpc>,
+        network: P2pNetwork,
         certificate_store: CertificateStore,
         consensus_store: Option<Arc<ConsensusStore>>,
         rx_consensus_round_updates: watch::Receiver<u64>,
@@ -244,7 +244,10 @@ impl CertificateWaiter {
                 let now = Instant::now();
                 match run_fetch_task(state.clone(), committee.clone(), committed_rounds).await {
                     Ok(_) => {
-                        debug!("Finished task to fetch certificates successfully, elapsed = {}s", now.elapsed().as_secs_f64());
+                        debug!(
+                            "Finished task to fetch certificates successfully, elapsed = {}s",
+                            now.elapsed().as_secs_f64()
+                        );
                     }
                     Err(e) => {
                         debug!("Error from task to fetch certificates: {e}");
@@ -330,7 +333,7 @@ async fn run_fetch_task(
 #[instrument(level = "debug", skip_all)]
 async fn fetch_certificates_helper(
     name: &PublicKey,
-    network: &Arc<dyn PrimaryToPrimaryRpc>,
+    network: &P2pNetwork,
     committee: &Committee,
     request: FetchCertificatesRequest,
 ) -> FetchCertificatesResponse {

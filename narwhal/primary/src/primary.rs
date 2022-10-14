@@ -415,7 +415,7 @@ impl Primary {
         let certificate_waiter_handle = CertificateWaiter::spawn(
             name.clone(),
             (**committee.load()).clone(),
-            Arc::new(P2pNetwork::new(network.clone())),
+            P2pNetwork::new(network.clone()),
             certificate_store.clone(),
             if internal_consensus {
                 Some(consensus_store)

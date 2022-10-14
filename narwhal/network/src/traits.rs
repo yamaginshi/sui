@@ -93,7 +93,7 @@ pub trait ReliableNetwork<Request: Clone + Send + Sync> {
 }
 
 #[async_trait]
-pub trait PrimaryToPrimaryRpc: Send + Sync {
+pub trait PrimaryToPrimaryRpc {
     async fn fetch_certificates(
         &self,
         peer: &NetworkPublicKey,
