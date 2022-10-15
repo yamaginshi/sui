@@ -19,7 +19,7 @@ use std::sync::Arc;
 use storage::{CertificateStore, ProposerKey, ProposerStore};
 use store::{
     reopen,
-    rocks::{open_cf, DBMap},
+    rocks::{default_rocksdb_options, open_cf, DBMap},
     Store,
 };
 use tokio::sync::oneshot;
@@ -63,9 +63,13 @@ impl NodeStorage {
 
     /// Open or reopen all the storage of the node.
     pub fn reopen<Path: AsRef<std::path::Path>>(store_path: Path) -> Self {
+        let mut db_options = default_rocksdb_options();
+        db_options.optimize_universal_style_compaction(512 * 1024 * 1024);
+        // Using a higher number of levels to reduce compaction due to writes.
+        db_options.set_num_levels(40);
         let rocksdb = open_cf(
             store_path,
-            None,
+            Some(db_options),
             &[
                 Self::LAST_PROPOSED_CF,
                 Self::VOTES_CF,
