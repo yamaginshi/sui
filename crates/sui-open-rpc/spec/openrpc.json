@@ -2485,6 +2485,7 @@
       "EventQuery": {
         "oneOf": [
           {
+            "description": "Return all events.",
             "type": "string",
             "enum": [
               "All"
@@ -3164,10 +3165,21 @@
         ]
       },
       "Ordering": {
-        "type": "string",
-        "enum": [
-          "Ascending",
-          "Descending"
+        "oneOf": [
+          {
+            "description": "Ascending order (oldest transaction first), transactions are causal ordered.",
+            "type": "string",
+            "enum": [
+              "Ascending"
+            ]
+          },
+          {
+            "description": "Descending order (latest transaction first), transactions are causal ordered.",
+            "type": "string",
+            "enum": [
+              "Descending"
+            ]
+          }
         ]
       },
       "Owner": {
@@ -4140,6 +4152,7 @@
       "TransactionQuery": {
         "oneOf": [
           {
+            "description": "All transaction hashes.",
             "type": "string",
             "enum": [
               "All"
