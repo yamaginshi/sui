@@ -23,6 +23,7 @@ use sui_types::base_types::SequenceNumber;
 use sui_types::base_types::{ObjectID, SuiAddress, TransactionDigest};
 use sui_types::batch::TxSequenceNumber;
 use sui_types::crypto::{SignableBytes, SignatureScheme};
+use sui_types::intent::ChainId;
 use sui_types::messages::{Transaction, TransactionData};
 use sui_types::move_package::normalize_modules;
 use sui_types::object::{Data, ObjectRead, Owner};
@@ -293,6 +294,17 @@ impl RpcFullNodeReadApiServer for FullNodeApi {
         Ok(self
             .state
             .get_past_object_read(&object_id, version)
+            .await
+            .map_err(|e| anyhow!("{e}"))?
+            .try_into()?)
+    }
+
+    async fn get_chain_id(
+        &self,
+    ) -> RpcResult<ChainId> {
+        Ok(self
+            .state
+            .chain_id()
             .await
             .map_err(|e| anyhow!("{e}"))?
             .try_into()?)

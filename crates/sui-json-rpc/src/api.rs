@@ -18,6 +18,7 @@ use sui_open_rpc_macros::open_rpc;
 use sui_types::base_types::{ObjectID, SequenceNumber, SuiAddress, TransactionDigest};
 use sui_types::batch::TxSequenceNumber;
 use sui_types::crypto::SignatureScheme;
+use sui_types::intent::ChainId;
 use sui_types::messages::ExecuteTransactionRequestType;
 use sui_types::object::Owner;
 use sui_types::query::{Ordering, TransactionQuery};
@@ -190,6 +191,12 @@ pub trait RpcFullNodeReadApi {
         /// the version of the queried object. If None, default to the latest known version
         version: SequenceNumber,
     ) -> RpcResult<GetPastObjectDataResponse>;
+
+    /// Return the chain ID that the node is running on.
+    #[method(name = "getChainId")]
+    async fn get_chain_id(
+        &self,
+    ) -> RpcResult<ChainId>;
 }
 
 #[open_rpc(namespace = "sui", tag = "Transaction Builder API")]

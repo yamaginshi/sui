@@ -11,6 +11,7 @@ use move_vm_runtime::native_functions::NativeFunctionTable;
 use narwhal_crypto::NetworkPublicKey;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_with::serde_as;
+use sui_types::intent::ChainId;
 use std::collections::BTreeMap;
 use std::convert::TryInto;
 use std::{fs, path::Path};
@@ -43,6 +44,7 @@ use tracing::trace;
 pub struct Genesis {
     objects: Vec<Object>,
     validator_set: Vec<ValidatorInfo>,
+    chain_id: Option<ChainId>
 }
 
 impl Genesis {
