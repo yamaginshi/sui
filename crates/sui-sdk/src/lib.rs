@@ -41,8 +41,9 @@ use sui_types::base_types::{ObjectID, SuiAddress, TransactionDigest};
 use sui_types::messages::Transaction;
 use sui_types::query::{Ordering, TransactionQuery};
 use types::base_types::SequenceNumber;
+use types::committee::EpochId;
 use types::error::TRANSACTION_NOT_FOUND_MSG_PREFIX;
-use types::messages::ExecuteTransactionRequestType;
+use types::messages::{CommitteeInfoResponse, ExecuteTransactionRequestType};
 
 // re-export essential sui crates
 pub mod crypto;
@@ -59,6 +60,7 @@ pub struct TransactionExecutionResult {
     pub parsed_data: Option<SuiParsedTransactionResponse>,
 }
 
+#[derive(Clone)]
 pub struct SuiClient {
     api: Arc<SuiClientApi>,
     transaction_builder: TransactionBuilder,
@@ -315,8 +317,21 @@ impl ReadApi {
             SuiClientApi::Embedded(c) => c.get_transaction(digest).await?,
         })
     }
+
+    pub async fn get_committee_info(
+        &self,
+        epoch: Option<EpochId>,
+    ) -> anyhow::Result<CommitteeInfoResponse> {
+        Ok(match &*self.api {
+            SuiClientApi::Rpc(c) => c.http.get_committee_info(epoch).await?,
+            SuiClientApi::Embedded(_c) => {
+                unimplemented!("Gateway/embedded client does not support get committee info")
+            }
+        })
+    }
 }
 
+#[derive(Clone)]
 pub struct FullNodeApi(Arc<SuiClientApi>);
 
 impl FullNodeApi {
@@ -335,6 +350,8 @@ impl FullNodeApi {
         })
     }
 }
+
+#[derive(Clone)]
 pub struct EventApi(Arc<SuiClientApi>);
 
 impl EventApi {
@@ -352,6 +369,8 @@ impl EventApi {
         }
     }
 }
+
+#[derive(Clone)]
 pub struct QuorumDriver {
     api: Arc<SuiClientApi>,
 }
@@ -501,6 +520,7 @@ impl QuorumDriver {
     }
 }
 
+#[derive(Clone)]
 pub struct WalletSyncApi(Arc<SuiClientApi>);
 
 impl WalletSyncApi {
