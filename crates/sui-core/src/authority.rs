@@ -704,7 +704,7 @@ impl AuthorityState {
             .instrument(span)
             .await?;
 
-        if self.is_cert_awaiting_sequencing(digest)? {
+        if !certificate.is_system_tx() && self.is_cert_awaiting_sequencing(&certificate)? {
             debug!("shared object cert has not been sequenced by narwhal");
             return Err(SuiError::SharedObjectLockNotSetError);
         }
@@ -2085,19 +2085,16 @@ impl AuthorityState {
     }
 
     /// Returns true if certificate is a shared-object cert but has not been sequenced.
-    async fn is_cert_awaiting_sequencing(
-        &self,
-        certificate: &CertifiedTransaction,
-    ) -> SuiResult<bool> {
+    fn is_cert_awaiting_sequencing(&self, certificate: &CertifiedTransaction) -> SuiResult<bool> {
         // always an error to call this on fullnode.
         assert!(!self.is_fullnode());
 
-        if !certicate.contains_shared_object() {
+        if !certificate.contains_shared_object() {
             Ok(false)
         } else {
-            !self
-                .database
+            self.database
                 .consensus_message_processed(certificate.digest())
+                .map(|r| !r)
         }
     }
 
