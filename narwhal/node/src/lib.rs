@@ -324,6 +324,7 @@ impl Node {
             (**committee.load()).clone(),
             store.consensus_store.clone(),
             parameters.gc_depth,
+            consensus_metrics.clone(),
         );
         let consensus_handles = Consensus::spawn(
             (**committee.load()).clone(),
