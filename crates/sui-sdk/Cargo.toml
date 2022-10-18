@@ -29,6 +29,7 @@ sui-json = { path = "../sui-json" }
 sui-core = { path = "../sui-core" }
 sui-config = { path = "../sui-config" }
 sui-adapter =  { path = "../sui-adapter" }
+sui-keys =  { path = "../sui-keys" }
 
 move-core-types.workspace = true
 move-bytecode-utils.workspace = true
