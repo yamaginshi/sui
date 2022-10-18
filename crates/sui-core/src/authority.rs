@@ -704,7 +704,7 @@ impl AuthorityState {
             .instrument(span)
             .await?;
 
-        if self.is_cert_awaiting_sequencing(digest)? {
+        if !bypass_validator_halt && self.is_cert_awaiting_sequencing(digest)? {
             debug!("shared object cert has not been sequenced by narwhal");
             return Err(SuiError::SharedObjectLockNotSetError);
         }
