@@ -3,7 +3,7 @@
 
 import { SuiAddress, ObjectOwner, TransactionDigest } from './common';
 import { ObjectId, SequenceNumber } from './objects';
-import {Owner, SuiJsonValue} from './transactions';
+import {SuiJsonValue} from './transactions';
 
 // event types mirror those in "sui-json-rpc-types/lib.rs"
 export type MoveEvent = {
@@ -67,7 +67,7 @@ export type EventQuery =
     | { "MoveEvent": string }
     | { "EventType": EventType }
     | { "Sender": SuiAddress }
-    | { "Recipient": Owner }
+    | { "Recipient": ObjectOwner }
     | { "Object": ObjectId }
     | { "TimeRange": { "start_time": number, "end_time": number } };
 

@@ -180,12 +180,6 @@ export type TransactionQuery =
 
 export type Ordering = 'Ascending' | 'Descending';
 
-export type Owner =
-    | { "AddressOwner": SuiAddress }
-    | { "ObjectOwner": SuiAddress }
-    | "Shared"
-    | "Immutable"
-
 export type MoveCall = {
   package: SuiObjectRef;
   module: string;
