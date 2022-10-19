@@ -1,5 +1,12 @@
 # @mysten/sui.js
 
+## 0.13.1
+
+### Patch Changes
+
+- e86f8bc5e: Add `getRpcApiVersion` to Provider interface
+- b4a8ee9bf: Support passing a vector of objects in LocalTxnBuilder
+
 ## 0.13.0
 
 ### Minor Changes
